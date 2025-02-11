@@ -113,39 +113,60 @@ func getValueByPath(record map[string]any, path string) any {
 	return current
 }
 
-// applyMapping applies a MappingDefinition to a record.
-func applyMapping(record map[string]any, mapping MappingDefinition) any {
-	if mapping.IsSimple {
-		// For a simple mapping, the value of Simple is used as the path.
-		path := mapping.Simple
-		return getValueByPath(record, path)
-	} else {
-		srcVal := getValueByPath(record, mapping.Src)
-		s, ok := srcVal.(string)
-		if !ok {
-			return nil
+func hasKeys[K comparable, V any](m map[K]V, ks ...K) bool {
+	for _, k := range ks {
+		if _, ok := m[k]; !ok {
+			return false
 		}
-		if mapping.Regex != "" {
-			re, err := regexp.Compile(mapping.Regex)
+	}
+	return true
+}
+
+func strval(om OutputMap, key string) string {
+	if val, ok := om[key].(string); ok {
+		return val
+	}
+	return ""
+}
+
+// applyMapping applies a Output to a record.
+func applyMapping(name string, in, out map[string]any, outSpec any) {
+	switch v := outSpec.(type) {
+	case string:
+		out[name] = getValueByPath(in, v)
+	case OutputMap:
+		if hasKeys(v, "src", "regex", "value") {
+			src := strval(v, "src")
+			regex := strval(v, "regex")
+			re, err := regexp.Compile(regex)
 			if err != nil {
-				return nil
+				return
 			}
-			matches := re.FindStringSubmatch(s)
+			srcVal, ok := getValueByPath(in, src).(string)
+			if !ok {
+				return
+			}
+			matches := re.FindStringSubmatch(srcVal)
 			if len(matches) == 0 {
-				return nil
+				return
 			}
-			if mapping.Value != "" {
-				result := mapping.Value
+			val := strval(v, "value")
+			if val != "" {
+				result := val
 				// Replace $1, $2, … with captured groups.
 				for i, match := range matches[1:] {
 					placeholder := fmt.Sprintf("$%d", i+1)
 					result = strings.ReplaceAll(result, placeholder, match)
 				}
-				return result
+				out[name] = result
 			}
-			return matches[0]
+		} else {
+			newout := make(OutputMap)
+			out[name] = newout
+			for k := range v {
+				applyMapping(k, in, newout, v[k])
+			}
 		}
-		return srcVal
 	}
 }
 
@@ -153,10 +174,7 @@ func applyMapping(record map[string]any, mapping MappingDefinition) any {
 func applyFieldMappings(record map[string]any, mappings []FieldMapping) map[string]any {
 	output := make(map[string]any)
 	for _, fm := range mappings {
-		val := applyMapping(record, fm.Mapping)
-		if val != nil {
-			output[fm.Key] = val
-		}
+		applyMapping(fm.Key, record, output, fm.Output)
 	}
 	return output
 }
@@ -185,7 +203,7 @@ func processInput(record map[string]any, config Config) map[string]any {
 		return nil
 	}
 
-	// Nothing was mapped so we putput the whole thing
+	// Nothing was mapped so we output the whole thing
 	if len(output) == 0 {
 		return record
 	}

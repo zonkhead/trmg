@@ -2,19 +2,19 @@ package main
 
 import (
 	"regexp"
-
-	"gopkg.in/yaml.v3"
 )
 
 const DEFAULT_MATCH_RULE = "all"
 const DEFAULT_INPUT_FORMAT = "yaml"
 const DEFAULT_OUTPUT_FORMAT = "yaml"
 
+type OutputMap map[string]any
+
 // Config represents the configuration as defined in YAML.
 type Config struct {
-	MatchRule       string                         `yaml:"match-rule"`
-	CommonOutput    []map[string]MappingDefinition `yaml:"common-output"`
-	SpecificOutputs []SpecificOutputRule           `yaml:"specific-outputs"`
+	MatchRule       string               `yaml:"match-rule"`
+	CommonOutput    []OutputMap          `yaml:"common-output"`
+	SpecificOutputs []SpecificOutputRule `yaml:"specific-outputs"`
 	InputFormat     string
 	OutputFormat    string
 	Buffered        bool
@@ -25,39 +25,6 @@ func (c *Config) setDefaults() *Config {
 	c.InputFormat = DEFAULT_INPUT_FORMAT
 	c.OutputFormat = DEFAULT_OUTPUT_FORMAT
 	return c
-}
-
-// MappingDefinition can be either a simple string (a path)
-// or a complex mapping with "src", "regex", and "value".
-type MappingDefinition struct {
-	IsSimple bool
-	Simple   string
-	Src      string
-	Regex    string
-	Value    string
-}
-
-// UnmarshalYAML implements custom unmarshaling for MappingDefinition.
-func (m *MappingDefinition) UnmarshalYAML(value *yaml.Node) error {
-	if value.Kind == yaml.ScalarNode {
-		m.IsSimple = true
-		m.Simple = value.Value
-		return nil
-	}
-	// Otherwise expect a mapping
-	var aux struct {
-		Src   string `yaml:"src"`
-		Regex string `yaml:"regex"`
-		Value string `yaml:"value"`
-	}
-	if err := value.Decode(&aux); err != nil {
-		return err
-	}
-	m.IsSimple = false
-	m.Src = aux.Src
-	m.Regex = aux.Regex
-	m.Value = aux.Value
-	return nil
 }
 
 // AndCondition represents one condition in a rule's "and" list.
@@ -89,11 +56,11 @@ func (ac *AndCondition) Check(record map[string]any) bool {
 
 // SpecificOutputRule represents one specific rule.
 type SpecificOutputRule struct {
-	Field   string                         `yaml:"field"`
-	Eq      *string                        `yaml:"eq,omitempty"`
-	Matches *string                        `yaml:"matches,omitempty"`
-	And     []AndCondition                 `yaml:"and,omitempty"`
-	Output  []map[string]MappingDefinition `yaml:"output"`
+	Field   string         `yaml:"field"`
+	Eq      *string        `yaml:"eq,omitempty"`
+	Matches *string        `yaml:"matches,omitempty"`
+	And     []AndCondition `yaml:"and,omitempty"`
+	Output  []OutputMap    `yaml:"output"`
 }
 
 // Check returns true if the rule matches the given record.
@@ -128,16 +95,16 @@ func (r *SpecificOutputRule) Check(record map[string]any) bool {
 
 // FieldMapping is a helper type for storing a mapping key and its definition.
 type FieldMapping struct {
-	Key     string
-	Mapping MappingDefinition
+	Key    string
+	Output any
 }
 
 // convertFieldMappings converts a slice of one-key maps into a slice of FieldMapping.
-func convertFieldMappings(maps []map[string]MappingDefinition) []FieldMapping {
+func convertFieldMappings(maps []OutputMap) []FieldMapping {
 	var result []FieldMapping
 	for _, m := range maps {
 		for k, v := range m {
-			result = append(result, FieldMapping{Key: k, Mapping: v})
+			result = append(result, FieldMapping{Key: k, Output: v})
 		}
 	}
 	return result
