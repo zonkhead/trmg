@@ -24,6 +24,8 @@ func main() {
 		go readJSONInput(objs, config)
 	case "yaml":
 		go readYAMLInput(objs, config)
+	case "csv":
+		go readCSVInput(objs, config)
 	default:
 		log.Fatalf("Unsupported input format: %s", config.InputFormat)
 	}
@@ -52,7 +54,7 @@ func getConfig() Config {
 	var config Config
 
 	flag.StringVar(&configPath, "c", "", "Path to configuration YAML file")
-	flag.StringVar(&config.InputFormat, "i", "yaml", "Input format: jsonl or yaml")
+	flag.StringVar(&config.InputFormat, "i", "yaml", "Input format: jsonl, yaml, or csv")
 	flag.StringVar(&config.OutputFormat, "o", "yaml", "Output format: jsonl, yaml, or csv")
 	flag.BoolVar(&config.Buffered, "buffered", false, "Force buffered output (don't flush after each record)")
 	versionCmd := flag.Bool("version", false, "Show version info")
@@ -74,7 +76,7 @@ func getConfig() Config {
 		os.Exit(0)
 	}
 
-	if !contains([]string{"jsonl", "yaml"}, config.InputFormat) {
+	if !contains([]string{"jsonl", "yaml", "csv"}, config.InputFormat) {
 		stderrln("Invalid input format: " + config.InputFormat)
 		os.Exit(0)
 	}
@@ -355,6 +357,42 @@ func readYAMLInput(objs chan<- map[string]any, config Config) {
 			}
 		default:
 			// Ignore other document types.
+		}
+	}
+}
+
+func readCSVInput(objs chan<- map[string]any, config Config) {
+	defer close(objs)
+	reader := csv.NewReader(os.Stdin)
+	
+	// Read header row
+	headers, err := reader.Read()
+	if err != nil {
+		log.Fatalf("Error reading CSV header: %v", err)
+	}
+
+	// Read data rows
+	for {
+		record, err := reader.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			log.Printf("Error reading CSV record: %v", err)
+			continue
+		}
+
+		// Convert CSV record to map
+		obj := make(map[string]any, len(headers))
+		for i, value := range record {
+			if i < len(headers) {
+				obj[headers[i]] = value
+			}
+		}
+
+		processed := processInput(obj, config)
+		if processed != nil {
+			objs <- processed
 		}
 	}
 }
