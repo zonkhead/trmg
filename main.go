@@ -61,7 +61,7 @@ func getConfig() Config {
 
 	flag.Usage = func() {
 		stderrln("Usage of trmg:")
-		stderrln("  An application that takes in a jsonl or yaml input stream")
+		stderrln("  An application that takes in a jsonl, yaml, or csv input stream")
 		stderrln("  and lets you customize the output objects and data type.")
 		stderrln("  See the README for details:")
 		stderrln("  https://github.com/zonkhead/transmogrifier\n")
@@ -364,7 +364,7 @@ func readYAMLInput(objs chan<- map[string]any, config Config) {
 func readCSVInput(objs chan<- map[string]any, config Config) {
 	defer close(objs)
 	reader := csv.NewReader(os.Stdin)
-	
+
 	// Read header row
 	headers, err := reader.Read()
 	if err != nil {
