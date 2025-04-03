@@ -20,6 +20,8 @@ func main() {
 	objs := make(chan map[string]any, 16)
 
 	switch config.InputFormat {
+	case "json":
+		go readJSONInput(objs, config)
 	case "jsonl":
 		go readJSONInput(objs, config)
 	case "yaml":
