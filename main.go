@@ -40,6 +40,21 @@ func main() {
 		for obj := range objs {
 			outputCSVRecord(obj, headerOrder, csvWriter, config.Buffered)
 		}
+	} else if config.OutputFormat == "json" || config.OutputFormat == "jsonp" {
+		// For standard JSON and pretty JSON, we need to wrap all objects in an array
+		writer.WriteString("[\n")
+		isFirst := true
+		for obj := range objs {
+			if !isFirst {
+				writer.WriteString(",\n")
+			}
+			isFirst = false
+			outputRecord(obj, config.OutputFormat, writer, config.Buffered)
+		}
+		writer.WriteString("\n]")
+		if !config.Buffered {
+			writer.Flush()
+		}
 	} else {
 		for obj := range objs {
 			outputRecord(obj, config.OutputFormat, writer, config.Buffered)
@@ -54,8 +69,8 @@ func getConfig() Config {
 	var config Config
 
 	flag.StringVar(&configPath, "c", "", "Path to configuration YAML file")
-	flag.StringVar(&config.InputFormat, "i", "yaml", "Input format: jsonl, yaml, or csv")
-	flag.StringVar(&config.OutputFormat, "o", "yaml", "Output format: jsonl, yaml, or csv")
+	flag.StringVar(&config.InputFormat, "i", "yaml", "Input format: json, jsonl, yaml, or csv")
+	flag.StringVar(&config.OutputFormat, "o", "yaml", "Output format: json, jsonl, jsonp (pretty), yaml, or csv")
 	flag.BoolVar(&config.Buffered, "buffered", false, "Force buffered output (don't flush after each record)")
 	versionCmd := flag.Bool("version", false, "Show version info")
 
@@ -64,7 +79,7 @@ func getConfig() Config {
 		stderrln("  An application that takes in a jsonl, yaml, or csv input stream")
 		stderrln("  and lets you customize the output objects and data type.")
 		stderrln("  See the README for details:")
-		stderrln("  https://github.com/zonkhead/transmogrifier\n")
+		stderrln("  https://github.com/zonkhead/trmg\n")
 		stderrln("Options:")
 		flag.PrintDefaults()
 	}
@@ -76,11 +91,11 @@ func getConfig() Config {
 		os.Exit(0)
 	}
 
-	if !contains([]string{"jsonl", "yaml", "csv"}, config.InputFormat) {
+	if !contains([]string{"json", "jsonl", "yaml", "csv"}, config.InputFormat) {
 		stderrln("Invalid input format: " + config.InputFormat)
 		os.Exit(0)
 	}
-	if !contains([]string{"jsonl", "yaml", "csv"}, config.OutputFormat) {
+	if !contains([]string{"json", "jsonl", "jsonp", "yaml", "csv"}, config.OutputFormat) {
 		stderrln("Invalid output format: " + config.OutputFormat)
 		os.Exit(0)
 	}
@@ -246,17 +261,23 @@ func contains(slice []string, s string) bool {
 	return false
 }
 
-// outputRecord writes a single record in the given format (jsonl, yaml or csv).
+// outputRecord writes a single record in the given format (json, jsonl, jsonp, yaml or csv).
 func outputRecord(record map[string]any, format string, writer *bufio.Writer, buffered bool) {
 	var outBytes []byte
 	var err error
-	if format == "jsonl" {
-		outBytes, err = json.Marshal(record)
+	if format == "json" || format == "jsonl" || format == "jsonp" {
+		if format == "jsonp" {
+			outBytes, err = json.MarshalIndent(record, "", "  ")
+		} else {
+			outBytes, err = json.Marshal(record)
+		}
 		if err != nil {
 			log.Printf("Error marshaling JSON: %v", err)
 			return
 		}
-		outBytes = append(outBytes, '\n')
+		if format == "jsonl" {
+			outBytes = append(outBytes, '\n')
+		}
 	} else if format == "yaml" {
 		outBytes, err = yaml.Marshal(record)
 		if err != nil {
@@ -303,24 +324,40 @@ func outputCSVRecord(rec map[string]any, headers []string, writer *csv.Writer, b
 
 func readJSONInput(objs chan<- map[string]any, config Config) {
 	defer close(objs)
-	scanner := bufio.NewScanner(os.Stdin)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if strings.TrimSpace(line) == "" {
-			continue
+
+	if config.InputFormat == "json" {
+		var records []map[string]any
+		input, _ := io.ReadAll(os.Stdin)
+		if err := json.Unmarshal(input, &records); err == nil {
+			for _, record := range records {
+				result := processInput(record, config)
+				if result != nil {
+					objs <- result
+				}
+			}
+		} else {
+			log.Fatalf("Error parsing JSON input: %v", err)
 		}
-		var record map[string]any
-		if err := json.Unmarshal([]byte(line), &record); err != nil {
-			log.Printf("Error parsing JSON: %v", err)
-			continue
+	} else {
+		scanner := bufio.NewScanner(os.Stdin)
+		for scanner.Scan() {
+			line := scanner.Text()
+			if strings.TrimSpace(line) == "" {
+				continue
+			}
+			var record map[string]any
+			if err := json.Unmarshal([]byte(line), &record); err != nil {
+				log.Printf("Error parsing JSON: %v", err)
+				continue
+			}
+			result := processInput(record, config)
+			if result != nil {
+				objs <- result
+			}
 		}
-		result := processInput(record, config)
-		if result != nil {
-			objs <- result
+		if err := scanner.Err(); err != nil {
+			log.Fatalf("Error reading JSONL input: %v", err)
 		}
-	}
-	if err := scanner.Err(); err != nil {
-		log.Fatalf("Error reading input: %v", err)
 	}
 }
 

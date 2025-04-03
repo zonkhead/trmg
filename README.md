@@ -1,6 +1,6 @@
 # Transmogrifier
 
-Transmogrifier translates jsonl and yaml streams. You can customize the output objects' structure as well as output jsonl, yaml, or csv.
+Transmogrifier translates jsonl and yaml streams. You can customize the output objects' structure as well as output json, jsonl, jsonp, yaml, or csv.
 
 Example config:
 
