@@ -20,13 +20,6 @@ type Config struct {
 	Buffered        bool
 }
 
-func (c *Config) setDefaults() *Config {
-	c.MatchRule = DEFAULT_MATCH_RULE
-	c.InputFormat = DEFAULT_INPUT_FORMAT
-	c.OutputFormat = DEFAULT_OUTPUT_FORMAT
-	return c
-}
-
 // AndCondition represents one condition in a rule's "and" list.
 type AndCondition struct {
 	Field   string  `yaml:"field"`
