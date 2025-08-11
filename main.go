@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"maps"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -212,9 +214,7 @@ func processInput(record map[string]any, config Config) map[string]any {
 			matchedSpecific = true
 			ruleMappings := convertFieldMappings(rule.Output)
 			additional := applyFieldMappings(record, ruleMappings)
-			for k, v := range additional {
-				output[k] = v
-			}
+			maps.Copy(output, additional)
 			break
 		}
 	}
@@ -255,12 +255,7 @@ func computeHeaderOrder(config *Config) []string {
 }
 
 func contains(slice []string, s string) bool {
-	for _, v := range slice {
-		if v == s {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(slice, s)
 }
 
 // outputRecord writes a single record in the given format (json, jsonl, jsonp, yaml or csv).
