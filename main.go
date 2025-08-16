@@ -11,7 +11,6 @@ import (
 	"maps"
 	"os"
 	"regexp"
-	"slices"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -37,38 +36,29 @@ func main() {
 	writer := bufio.NewWriter(os.Stdout)
 	defer writer.Flush()
 
-	if config.OutputFormat == "csv" {
-		headerOrder := computeHeaderOrder(&config)
-		csvWriter := csv.NewWriter(writer)
-		csvWriter.Write(headerOrder)
-		for obj := range objs {
-			outputCSVRecord(obj, headerOrder, csvWriter, config.Buffered)
+	formatter, err := NewFormatter(&config, writer)
+	if err != nil {
+		log.Fatalf("Error creating formatter: %v", err)
+	}
+
+	if err := formatter.WriteHeader(); err != nil {
+		log.Fatalf("Error writing header: %v", err)
+	}
+
+	for obj := range objs {
+		if err := formatter.WriteRecord(obj); err != nil {
+			log.Printf("Error writing record: %v", err)
 		}
-	} else if config.OutputFormat == "json" || config.OutputFormat == "jsonp" {
-		// For standard JSON and pretty JSON, we need to wrap all objects in an array
-		writer.WriteString("[\n")
-		isFirst := true
-		for obj := range objs {
-			if !isFirst {
-				writer.WriteString(",\n")
-			}
-			isFirst = false
-			outputRecord(obj, config.OutputFormat, writer, config.Buffered)
-		}
-		writer.WriteString("\n]")
-		if !config.Buffered {
-			writer.Flush()
-		}
-	} else {
-		for obj := range objs {
-			outputRecord(obj, config.OutputFormat, writer, config.Buffered)
-		}
+	}
+
+	if err := formatter.WriteFooter(); err != nil {
+		log.Fatalf("Error writing footer: %v", err)
 	}
 }
 
 // Reads the command line flags and build a Config from the flags and an optional yaml config.
 func getConfig() Config {
-	version := "0.1.0"
+	version := "0.1.1"
 	var configPath string
 	var config Config
 
@@ -228,95 +218,6 @@ func processInput(record map[string]any, config Config) map[string]any {
 	}
 
 	return output
-}
-
-// computeHeaderOrder computes the CSV header order based on the configuration.
-func computeHeaderOrder(config *Config) []string {
-	var headers []string
-	// Add keys from common-output (in order).
-	for _, m := range config.CommonOutput {
-		for k := range m {
-			if !contains(headers, k) {
-				headers = append(headers, k)
-			}
-		}
-	}
-	// Then add keys from specific-outputs (in order).
-	for _, rule := range config.SpecificOutputs {
-		for _, m := range rule.Output {
-			for k := range m {
-				if !contains(headers, k) {
-					headers = append(headers, k)
-				}
-			}
-		}
-	}
-	return headers
-}
-
-func contains(slice []string, s string) bool {
-	return slices.Contains(slice, s)
-}
-
-// outputRecord writes a single record in the given format (json, jsonl, jsonp, yaml or csv).
-func outputRecord(record map[string]any, format string, writer *bufio.Writer, buffered bool) {
-	var outBytes []byte
-	var err error
-	if format == "json" || format == "jsonl" || format == "jsonp" {
-		if format == "jsonp" {
-			outBytes, err = json.MarshalIndent(record, "", "  ")
-		} else {
-			outBytes, err = json.Marshal(record)
-		}
-		if err != nil {
-			log.Printf("Error marshaling JSON: %v", err)
-			return
-		}
-		if format == "jsonl" {
-			outBytes = append(outBytes, '\n')
-		}
-	} else if format == "yaml" {
-		outBytes, err = yaml.Marshal(record)
-		if err != nil {
-			log.Printf("Error marshaling YAML: %v", err)
-			return
-		}
-		// Prepend a document separator.
-		outBytes = append([]byte("---\n"), outBytes...)
-	} else {
-		log.Printf("Unsupported output format: %s", format)
-		return
-	}
-	writer.Write(outBytes)
-	if !buffered {
-		writer.Flush()
-	}
-}
-
-// outputCSV writes all records as CSV using the given header order.
-func outputCSVRecord(rec map[string]any, headers []string, writer *csv.Writer, buffered bool) {
-	row := make([]string, len(headers))
-	for i, h := range headers {
-		if val, ok := rec[h]; ok {
-			// If the value is a string, use it directly.
-			if s, ok := val.(string); ok {
-				row[i] = s
-			} else {
-				b, err := json.Marshal(val)
-				if err != nil {
-					row[i] = ""
-				} else {
-					row[i] = string(b)
-				}
-			}
-		} else {
-			row[i] = ""
-		}
-	}
-	writer.Write(row)
-	if !buffered {
-		writer.Flush()
-	}
 }
 
 func readJSONInput(objs chan<- map[string]any, config Config) {
