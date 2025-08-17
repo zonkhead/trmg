@@ -3,20 +3,28 @@ package main
 import (
 	"reflect"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
-
+func mustConfig(t *testing.T, yamlString string) *Config {
+	t.Helper()
+	var cfg Config
+	if err := yaml.Unmarshal([]byte(yamlString), &cfg); err != nil {
+		t.Fatalf("Failed to unmarshal YAML: %v", err)
+	}
+	return &cfg
+}
 
 func Test_processInput(t *testing.T) {
-	strPtr := func(s string) *string { return &s }
-
 	t.Run("only common mappings", func(t *testing.T) {
 		record := map[string]any{"foo": "bar"}
-		cfg := Config{
-			CommonOutput: []OutputMap{{"baz": "foo"}},
-			MatchRule:    "all",
-		}
-		got := processInput(record, cfg)
+		cfg := mustConfig(t, `
+match-rule: all
+common-output:
+- baz: foo
+`)
+		got := processInput(record, *cfg)
 		want := map[string]any{"baz": "bar"}
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("got %v, want %v", got, want)
@@ -25,16 +33,17 @@ func Test_processInput(t *testing.T) {
 
 	t.Run("specific rule matches", func(t *testing.T) {
 		record := map[string]any{"foo": "yes", "val": 123}
-		cfg := Config{
-			CommonOutput: []OutputMap{{"baz": "foo"}},
-			SpecificOutputs: []SpecificOutputRule{{
-				Field:  "foo",
-				Eq:     strPtr("yes"),
-				Output: []OutputMap{{"extra": "val"}},
-			}},
-			MatchRule: "all",
-		}
-		got := processInput(record, cfg)
+		cfg := mustConfig(t, `
+match-rule: all
+common-output:
+- baz: foo
+specific-outputs:
+- field: foo
+  eq: yes
+  output:
+  - extra: val
+`)
+		got := processInput(record, *cfg)
 		want := map[string]any{"baz": "yes", "extra": 123}
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("got %v, want %v", got, want)
@@ -43,16 +52,17 @@ func Test_processInput(t *testing.T) {
 
 	t.Run("drop-no-match", func(t *testing.T) {
 		record := map[string]any{"foo": "no"}
-		cfg := Config{
-			CommonOutput: []OutputMap{{"baz": "foo"}},
-			SpecificOutputs: []SpecificOutputRule{{
-				Field:  "foo",
-				Eq:     strPtr("yes"),
-				Output: []OutputMap{{"extra": "val"}},
-			}},
-			MatchRule: "drop-no-match",
-		}
-		got := processInput(record, cfg)
+		cfg := mustConfig(t, `
+match-rule: drop-no-match
+common-output:
+- baz: foo
+specific-outputs:
+- field: foo
+  eq: yes
+  output:
+  - extra: val
+`)
+		got := processInput(record, *cfg)
 		if got != nil {
 			t.Errorf("expected nil, got %v", got)
 		}
@@ -60,16 +70,16 @@ func Test_processInput(t *testing.T) {
 
 	t.Run("all/no match returns record", func(t *testing.T) {
 		record := map[string]any{"foo": "no", "bar": 1}
-		cfg := Config{
-			CommonOutput: []OutputMap{},
-			SpecificOutputs: []SpecificOutputRule{{
-				Field:  "foo",
-				Eq:     strPtr("yes"),
-				Output: []OutputMap{{"extra": "val"}},
-			}},
-			MatchRule: "all",
-		}
-		got := processInput(record, cfg)
+		cfg := mustConfig(t, `
+common-output: []
+specific-outputs:
+- field: foo
+  eq: yes
+  output:
+  - extra: val
+match-rule: all
+`)
+		got := processInput(record, *cfg)
 		if !reflect.DeepEqual(got, record) {
 			t.Errorf("got %v, want %v", got, record)
 		}
