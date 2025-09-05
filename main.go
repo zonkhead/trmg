@@ -58,7 +58,7 @@ func main() {
 
 // Reads the command line flags and build a Config from the flags and an optional yaml config.
 func getConfig() Config {
-	version := "0.1.1"
+	version := "0.1.2"
 	var configPath string
 	var config Config
 
@@ -224,18 +224,37 @@ func readJSONInput(objs chan<- map[string]any, config Config) {
 	defer close(objs)
 
 	if config.InputFormat == "json" {
+		input, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			log.Fatalf("Error reading input: %v", err)
+		}
+
+		// Try to unmarshal into an array of objects first.
 		var records []map[string]any
-		input, _ := io.ReadAll(os.Stdin)
-		if err := json.Unmarshal(input, &records); err == nil {
+		errArray := json.Unmarshal(input, &records)
+		if errArray == nil {
 			for _, record := range records {
 				result := processInput(record, config)
 				if result != nil {
 					objs <- result
 				}
 			}
-		} else {
-			log.Fatalf("Error parsing JSON input: %v", err)
+			return // Successfully processed as an array
 		}
+
+		// If unmarshaling into an array fails, try a single object.
+		var record map[string]any
+		errObject := json.Unmarshal(input, &record)
+		if errObject == nil {
+			result := processInput(record, config)
+			if result != nil {
+				objs <- result
+			}
+			return // Successfully processed as a single object
+		}
+
+		// If both fail, report the most likely error.
+		log.Fatalf("Error parsing JSON input: %v", errArray)
 	} else {
 		scanner := bufio.NewScanner(os.Stdin)
 		for scanner.Scan() {

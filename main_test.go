@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"reflect"
 	"testing"
 
@@ -183,5 +184,72 @@ func Test_getValueByPath(t *testing.T) {
 				t.Errorf("getValueByPath() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func testReadJSONInput(t *testing.T, jsonString string, expectedCount int) []map[string]any {
+	t.Helper()
+
+	// Mock stdin
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe failed: %v", err)
+	}
+	_, err = w.Write([]byte(jsonString))
+	if err != nil {
+		t.Fatalf("writing to pipe failed: %v", err)
+	}
+	w.Close()
+
+	origStdin := os.Stdin
+	os.Stdin = r
+	defer func() { os.Stdin = origStdin }()
+
+	// Setup channel and config
+	objs := make(chan map[string]any, 10)
+	config := Config{InputFormat: "json", MatchRule: "all"}
+
+	// Run the function
+	readJSONInput(objs, config)
+
+	// Collect results
+	var results []map[string]any
+	for obj := range objs {
+		results = append(results, obj)
+	}
+
+	// Assert count
+	if len(results) != expectedCount {
+		t.Errorf("got %d records, want %d", len(results), expectedCount)
+	}
+
+	return results
+}
+
+func TestReadJSONInput_SingleObject(t *testing.T) {
+	jsonInput := `{"id": 1, "name": "one"}`
+	results := testReadJSONInput(t, jsonInput, 1)
+
+	if len(results) == 1 {
+		want := map[string]any{"id": float64(1), "name": "one"}
+		if !reflect.DeepEqual(results[0], want) {
+			t.Errorf("got %v, want %v", results[0], want)
+		}
+	}
+}
+
+func TestReadJSONInput_ArrayOfObjects(t *testing.T) {
+	jsonInput := `[{"id": 1, "name": "one"}, {"id": 2, "name": "two"}]`
+	results := testReadJSONInput(t, jsonInput, 2)
+
+	if len(results) == 2 {
+		want1 := map[string]any{"id": float64(1), "name": "one"}
+		want2 := map[string]any{"id": float64(2), "name": "two"}
+		if !reflect.DeepEqual(results[0], want1) {
+			t.Errorf("record 1 got %v, want %v", results[0], want1)
+		}
+		if !reflect.DeepEqual(results[1], want2) {
+			t.Errorf("record 2 got %v, want %v", results[1], want2)
+		}
 	}
 }
