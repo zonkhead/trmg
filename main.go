@@ -19,12 +19,13 @@ import (
 func main() {
 	config := getConfig()
 	objs := make(chan map[string]any, 16)
+	var isSingletonInput bool
 
 	switch config.InputFormat {
 	case "json":
-		go readJSONInput(objs, config)
+		isSingletonInput = readJSONInput(objs, config)
 	case "jsonl":
-		go readJSONInput(objs, config)
+		go func() { readJSONInput(objs, config) }()
 	case "yaml":
 		go readYAMLInput(objs, config)
 	case "csv":
@@ -36,7 +37,7 @@ func main() {
 	writer := bufio.NewWriter(os.Stdout)
 	defer writer.Flush()
 
-	formatter, err := NewFormatter(&config, writer)
+	formatter, err := NewFormatter(&config, writer, isSingletonInput)
 	if err != nil {
 		log.Fatalf("Error creating formatter: %v", err)
 	}
@@ -58,7 +59,7 @@ func main() {
 
 // Reads the command line flags and build a Config from the flags and an optional yaml config.
 func getConfig() Config {
-	version := "0.1.2"
+	version := "0.1.3"
 	var configPath string
 	var config Config
 
@@ -220,7 +221,7 @@ func processInput(record map[string]any, config Config) map[string]any {
 	return output
 }
 
-func readJSONInput(objs chan<- map[string]any, config Config) {
+func readJSONInput(objs chan<- map[string]any, config Config) bool {
 	defer close(objs)
 
 	if config.InputFormat == "json" {
@@ -239,7 +240,7 @@ func readJSONInput(objs chan<- map[string]any, config Config) {
 					objs <- result
 				}
 			}
-			return // Successfully processed as an array
+			return false // Input was an array
 		}
 
 		// If unmarshaling into an array fails, try a single object.
@@ -250,12 +251,13 @@ func readJSONInput(objs chan<- map[string]any, config Config) {
 			if result != nil {
 				objs <- result
 			}
-			return // Successfully processed as a single object
+			return true // Input was a single object
 		}
 
 		// If both fail, report the most likely error.
 		log.Fatalf("Error parsing JSON input: %v", errArray)
 	} else {
+		// JSONL format - always returns false since it's line-by-line
 		scanner := bufio.NewScanner(os.Stdin)
 		for scanner.Scan() {
 			line := scanner.Text()
@@ -275,7 +277,9 @@ func readJSONInput(objs chan<- map[string]any, config Config) {
 		if err := scanner.Err(); err != nil {
 			log.Fatalf("Error reading JSONL input: %v", err)
 		}
+		return false // JSONL is never singleton
 	}
+	return false // fallback
 }
 
 func readYAMLInput(objs chan<- map[string]any, config Config) {

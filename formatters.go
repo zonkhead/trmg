@@ -19,14 +19,14 @@ type RecordFormatter interface {
 }
 
 // NewFormatter creates a new RecordFormatter based on the provided config.
-func NewFormatter(config *Config, writer *bufio.Writer) (RecordFormatter, error) {
+func NewFormatter(config *Config, writer *bufio.Writer, isSingletonInput bool) (RecordFormatter, error) {
 	switch config.OutputFormat {
 	case "json":
-		return NewJSONFormatter(writer), nil
+		return NewJSONFormatter(writer, isSingletonInput), nil
 	case "jsonl":
 		return NewJSONLFormatter(writer), nil
 	case "jsonp":
-		return NewJSONPFormatter(writer), nil
+		return NewJSONPFormatter(writer, isSingletonInput), nil
 	case "yaml":
 		return NewYAMLFormatter(writer), nil
 	case "csv":
@@ -39,21 +39,25 @@ func NewFormatter(config *Config, writer *bufio.Writer) (RecordFormatter, error)
 // ========
 // JSONFormatter formats records as a single JSON array.
 type JSONFormatter struct {
-	isFirst bool
-	writer  *bufio.Writer
+	isFirst          bool
+	writer           *bufio.Writer
+	isSingletonInput bool
 }
 
-func NewJSONFormatter(writer *bufio.Writer) *JSONFormatter {
-	return &JSONFormatter{writer: writer, isFirst: true}
+func NewJSONFormatter(writer *bufio.Writer, isSingletonInput bool) *JSONFormatter {
+	return &JSONFormatter{writer: writer, isFirst: true, isSingletonInput: isSingletonInput}
 }
 
 func (f *JSONFormatter) WriteHeader() error {
+	if f.isSingletonInput {
+		return nil // No header for singleton output
+	}
 	_, err := f.writer.WriteString("[\n")
 	return err
 }
 
 func (f *JSONFormatter) WriteRecord(record map[string]any) error {
-	if !f.isFirst {
+	if !f.isSingletonInput && !f.isFirst {
 		_, err := f.writer.WriteString(",\n")
 		if err != nil {
 			return err
@@ -71,6 +75,9 @@ func (f *JSONFormatter) WriteRecord(record map[string]any) error {
 }
 
 func (f *JSONFormatter) WriteFooter() error {
+	if f.isSingletonInput {
+		return nil // No footer for singleton output
+	}
 	_, err := f.writer.WriteString("\n]")
 	return err
 }
@@ -107,21 +114,25 @@ func (f *JSONLFormatter) WriteFooter() error {
 // ========
 // JSONPFormatter formats records as a pretty-printed JSON array.
 type JSONPFormatter struct {
-	isFirst bool
-	writer  *bufio.Writer
+	isFirst          bool
+	writer           *bufio.Writer
+	isSingletonInput bool
 }
 
-func NewJSONPFormatter(writer *bufio.Writer) *JSONPFormatter {
-	return &JSONPFormatter{writer: writer, isFirst: true}
+func NewJSONPFormatter(writer *bufio.Writer, isSingletonInput bool) *JSONPFormatter {
+	return &JSONPFormatter{writer: writer, isFirst: true, isSingletonInput: isSingletonInput}
 }
 
 func (f *JSONPFormatter) WriteHeader() error {
+	if f.isSingletonInput {
+		return nil // No header for singleton output
+	}
 	_, err := f.writer.WriteString("[")
 	return err
 }
 
 func (f *JSONPFormatter) WriteRecord(record map[string]any) error {
-	if !f.isFirst {
+	if !f.isSingletonInput && !f.isFirst {
 		_, err := f.writer.WriteString(",")
 		if err != nil {
 			return err
@@ -139,6 +150,9 @@ func (f *JSONPFormatter) WriteRecord(record map[string]any) error {
 }
 
 func (f *JSONPFormatter) WriteFooter() error {
+	if f.isSingletonInput {
+		return nil // No footer for singleton output
+	}
 	_, err := f.writer.WriteString("]")
 	return err
 }
