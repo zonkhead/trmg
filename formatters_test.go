@@ -163,3 +163,62 @@ func TestJSONPFormatter_SingletonVsArray(t *testing.T) {
 		}
 	})
 }
+
+func TestYAMLFormatter(t *testing.T) {
+	testRecord1 := map[string]any{"name": "Alice", "age": 30}
+	testRecord2 := map[string]any{"name": "Bob", "age": 25}
+
+	t.Run("singleton output", func(t *testing.T) {
+		var buf bytes.Buffer
+		writer := bufio.NewWriter(&buf)
+		formatter := NewYAMLFormatter(writer, SingletonInput)
+
+		formatter.WriteHeader()
+		formatter.WriteRecord(testRecord1)
+		formatter.WriteFooter()
+		writer.Flush()
+
+		got := buf.String()
+		// Note: yaml.v3 marshals maps in alphabetical key order.
+		want := "age: 30\nname: Alice\n"
+		if got != want {
+			t.Errorf("singleton output got %q, want %q", got, want)
+		}
+	})
+
+	t.Run("array output", func(t *testing.T) {
+		var buf bytes.Buffer
+		writer := bufio.NewWriter(&buf)
+		formatter := NewYAMLFormatter(writer, ArrayInput)
+
+		formatter.WriteHeader()
+		formatter.WriteRecord(testRecord1)
+		formatter.WriteRecord(testRecord2)
+		formatter.WriteFooter()
+		writer.Flush()
+
+		got := buf.String()
+		want := "- age: 30\n  name: Alice\n- age: 25\n  name: Bob\n"
+		if got != want {
+			t.Errorf("array output got %q, want %q", got, want)
+		}
+	})
+
+	t.Run("stream output", func(t *testing.T) {
+		var buf bytes.Buffer
+		writer := bufio.NewWriter(&buf)
+		formatter := NewYAMLFormatter(writer, StreamInput)
+
+		formatter.WriteHeader()
+		formatter.WriteRecord(testRecord1)
+		formatter.WriteRecord(testRecord2)
+		formatter.WriteFooter()
+		writer.Flush()
+
+		got := buf.String()
+		want := "age: 30\nname: Alice\n---\nage: 25\nname: Bob\n"
+		if got != want {
+			t.Errorf("stream output got %q, want %q", got, want)
+		}
+	})
+}

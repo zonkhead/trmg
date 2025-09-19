@@ -187,7 +187,7 @@ func Test_getValueByPath(t *testing.T) {
 	}
 }
 
-func testReadJSONInput(t *testing.T, jsonString string, expectedCount int) []map[string]any {
+func testReadJSONInput(t *testing.T, jsonString string, expectedCount int, expectedType InputType) []map[string]any {
 	t.Helper()
 
 	// Mock stdin
@@ -195,9 +195,12 @@ func testReadJSONInput(t *testing.T, jsonString string, expectedCount int) []map
 	if err != nil {
 		t.Fatalf("os.Pipe failed: %v", err)
 	}
-	_, err = w.Write([]byte(jsonString))
-	if err != nil {
-		t.Fatalf("writing to pipe failed: %v", err)
+	// Handle empty input case
+	if jsonString != "" {
+		_, err = w.Write([]byte(jsonString))
+		if err != nil {
+			t.Fatalf("writing to pipe failed: %v", err)
+		}
 	}
 	w.Close()
 
@@ -205,12 +208,13 @@ func testReadJSONInput(t *testing.T, jsonString string, expectedCount int) []map
 	os.Stdin = r
 	defer func() { os.Stdin = origStdin }()
 
-	// Setup channel and config
+	// Setup channels and config
 	objs := make(chan map[string]any, 10)
+	inputTypeChan := make(chan InputType, 1)
 	config := Config{InputFormat: "json", MatchRule: "all"}
 
 	// Run the function
-	readJSONInput(objs, config)
+	readJSONInput(objs, inputTypeChan, config)
 
 	// Collect results
 	var results []map[string]any
@@ -223,12 +227,26 @@ func testReadJSONInput(t *testing.T, jsonString string, expectedCount int) []map
 		t.Errorf("got %d records, want %d", len(results), expectedCount)
 	}
 
+	// Check input type
+	var gotType InputType
+	select {
+	case gotType = <-inputTypeChan:
+		if gotType != expectedType {
+			t.Errorf("got input type %v, want %v", gotType, expectedType)
+		}
+	default:
+		// This case is valid for empty input, where the channel is closed.
+		if jsonString != "" {
+			t.Errorf("did not receive an input type")
+		}
+	}
+
 	return results
 }
 
 func TestReadJSONInput_SingleObject(t *testing.T) {
 	jsonInput := `{"id": 1, "name": "one"}`
-	results := testReadJSONInput(t, jsonInput, 1)
+	results := testReadJSONInput(t, jsonInput, 1, SingletonInput)
 
 	if len(results) == 1 {
 		want := map[string]any{"id": float64(1), "name": "one"}
@@ -240,7 +258,7 @@ func TestReadJSONInput_SingleObject(t *testing.T) {
 
 func TestReadJSONInput_ArrayOfObjects(t *testing.T) {
 	jsonInput := `[{"id": 1, "name": "one"}, {"id": 2, "name": "two"}]`
-	results := testReadJSONInput(t, jsonInput, 2)
+	results := testReadJSONInput(t, jsonInput, 2, ArrayInput)
 
 	if len(results) == 2 {
 		want1 := map[string]any{"id": float64(1), "name": "one"}
@@ -252,4 +270,120 @@ func TestReadJSONInput_ArrayOfObjects(t *testing.T) {
 			t.Errorf("record 2 got %v, want %v", results[1], want2)
 		}
 	}
+}
+
+func testReadYAMLInput(t *testing.T, yamlString string, expectedCount int, expectedType InputType) []map[string]any {
+	t.Helper()
+
+	// Mock stdin
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe failed: %v", err)
+	}
+	if yamlString != "" {
+		_, err = w.Write([]byte(yamlString))
+		if err != nil {
+			t.Fatalf("writing to pipe failed: %v", err)
+		}
+	}
+	w.Close()
+
+	origStdin := os.Stdin
+	os.Stdin = r
+	defer func() { os.Stdin = origStdin }()
+
+	// Setup channels and config
+	objs := make(chan map[string]any, 10)
+	inputTypeChan := make(chan InputType, 1)
+	config := Config{MatchRule: "all"} // A minimal config
+
+	// Run the function in a goroutine
+	go readYAMLInput(objs, inputTypeChan, config)
+
+	// Collect all records from the objs channel until it's closed.
+	var results []map[string]any
+	for obj := range objs {
+		results = append(results, obj)
+	}
+
+	// After objs is closed, the input type should have been sent.
+	var gotType InputType
+	var chanOpen bool
+	select {
+	case gotType, chanOpen = <-inputTypeChan:
+		if !chanOpen {
+			// Channel was closed (empty input). The received gotType is the zero value.
+			if expectedType != SingletonInput { // The zero value for InputType is SingletonInput
+				t.Errorf("expected type %v for empty input, but channel was closed (implying SingletonInput)", expectedType)
+			}
+		} else if gotType != expectedType {
+			t.Errorf("got input type %v, want %v", gotType, expectedType)
+		}
+	default:
+		t.Fatalf("readYAMLInput finished but did not send or close inputTypeChan")
+	}
+
+	// Assert count
+	if len(results) != expectedCount {
+		t.Errorf("got %d records, want %d", len(results), expectedCount)
+	}
+
+	return results
+}
+
+func TestReadYAMLInput(t *testing.T) {
+	t.Run("singleton object", func(t *testing.T) {
+		yamlInput := `name: Alice`
+		results := testReadYAMLInput(t, yamlInput, 1, SingletonInput)
+		if len(results) == 1 {
+			want := map[string]any{"name": "Alice"}
+			if !reflect.DeepEqual(results[0], want) {
+				t.Errorf("got %v, want %v", results[0], want)
+			}
+		}
+	})
+
+	t.Run("array of objects", func(t *testing.T) {
+		yamlInput := `
+- name: Alice
+- name: Bob`
+		results := testReadYAMLInput(t, yamlInput, 2, ArrayInput)
+		if len(results) == 2 {
+			want1 := map[string]any{"name": "Alice"}
+			want2 := map[string]any{"name": "Bob"}
+			if !reflect.DeepEqual(results[0], want1) {
+				t.Errorf("record 1 got %v, want %v", results[0], want1)
+			}
+			if !reflect.DeepEqual(results[1], want2) {
+				t.Errorf("record 2 got %v, want %v", results[1], want2)
+			}
+		}
+	})
+
+	t.Run("stream of objects", func(t *testing.T) {
+		yamlInput := `
+name: Alice
+---
+name: Bob`
+		results := testReadYAMLInput(t, yamlInput, 2, StreamInput)
+		if len(results) == 2 {
+			want1 := map[string]any{"name": "Alice"}
+			want2 := map[string]any{"name": "Bob"}
+			if !reflect.DeepEqual(results[0], want1) {
+				t.Errorf("record 1 got %v, want %v", results[0], want1)
+			}
+			if !reflect.DeepEqual(results[1], want2) {
+				t.Errorf("record 2 got %v, want %v", results[1], want2)
+			}
+		}
+	})
+
+	t.Run("empty input", func(t *testing.T) {
+		// For empty input, the inputTypeChan is closed, resulting in a zero-value read (SingletonInput).
+		testReadYAMLInput(t, "", 0, SingletonInput)
+	})
+
+	t.Run("single empty array", func(t *testing.T) {
+		testReadYAMLInput(t, "[]", 0, ArrayInput)
+	})
 }

@@ -10,26 +10,35 @@ import (
 	"log"
 	"maps"
 	"os"
+	"reflect"
 	"regexp"
 	"strings"
 
 	"gopkg.in/yaml.v3"
 )
 
+// InputType represents the structure of the input data.
+type InputType int
+
+const (
+	SingletonInput InputType = iota
+	ArrayInput
+	StreamInput
+)
+
 func main() {
 	config := getConfig()
 	objs := make(chan map[string]any, 16)
-	var isSingletonInput bool
+	inputTypeChan := make(chan InputType, 1) // New channel for input type
 
 	switch config.InputFormat {
-	case "json":
-		isSingletonInput = readJSONInput(objs, config)
-	case "jsonl":
-		go func() { readJSONInput(objs, config) }()
+	case "json", "jsonl":
+		// readJSONInput will determine the type and send it to inputTypeChan
+		go readJSONInput(objs, inputTypeChan, config)
 	case "yaml":
-		go readYAMLInput(objs, config)
+		go readYAMLInput(objs, inputTypeChan, config)
 	case "csv":
-		go readCSVInput(objs, config)
+		go readCSVInput(objs, inputTypeChan, config)
 	default:
 		log.Fatalf("Unsupported input format: %s", config.InputFormat)
 	}
@@ -37,7 +46,11 @@ func main() {
 	writer := bufio.NewWriter(os.Stdout)
 	defer writer.Flush()
 
-	formatter, err := NewFormatter(&config, writer, isSingletonInput)
+	// Wait for the input type from the channel.
+	// If the channel is closed (e.g., empty input), it receives the zero value, which is SingletonInput.
+	inputType := <-inputTypeChan
+
+	formatter, err := NewFormatter(&config, writer, inputType) // Pass InputType to formatter
 	if err != nil {
 		log.Fatalf("Error creating formatter: %v", err)
 	}
@@ -59,7 +72,7 @@ func main() {
 
 // Reads the command line flags and build a Config from the flags and an optional yaml config.
 func getConfig() Config {
-	version := "0.1.3"
+	version := "0.1.4"
 	var configPath string
 	var config Config
 
@@ -221,43 +234,50 @@ func processInput(record map[string]any, config Config) map[string]any {
 	return output
 }
 
-func readJSONInput(objs chan<- map[string]any, config Config) bool {
+func readJSONInput(objs chan<- map[string]any, inputTypeChan chan<- InputType, config Config) {
 	defer close(objs)
+	defer close(inputTypeChan)
 
 	if config.InputFormat == "json" {
 		input, err := io.ReadAll(os.Stdin)
 		if err != nil {
 			log.Fatalf("Error reading input: %v", err)
 		}
+		if len(input) == 0 {
+			return
+		}
 
 		// Try to unmarshal into an array of objects first.
 		var records []map[string]any
 		errArray := json.Unmarshal(input, &records)
 		if errArray == nil {
+			inputTypeChan <- ArrayInput // It's an array
 			for _, record := range records {
 				result := processInput(record, config)
 				if result != nil {
 					objs <- result
 				}
 			}
-			return false // Input was an array
+			return
 		}
 
 		// If unmarshaling into an array fails, try a single object.
 		var record map[string]any
 		errObject := json.Unmarshal(input, &record)
 		if errObject == nil {
+			inputTypeChan <- SingletonInput // It's a single object
 			result := processInput(record, config)
 			if result != nil {
 				objs <- result
 			}
-			return true // Input was a single object
+			return
 		}
 
 		// If both fail, report the most likely error.
 		log.Fatalf("Error parsing JSON input: %v", errArray)
 	} else {
-		// JSONL format - always returns false since it's line-by-line
+		// JSONL format
+		inputTypeChan <- StreamInput // JSONL is always a stream
 		scanner := bufio.NewScanner(os.Stdin)
 		for scanner.Scan() {
 			line := scanner.Text()
@@ -277,55 +297,109 @@ func readJSONInput(objs chan<- map[string]any, config Config) bool {
 		if err := scanner.Err(); err != nil {
 			log.Fatalf("Error reading JSONL input: %v", err)
 		}
-		return false // JSONL is never singleton
 	}
-	return false // fallback
 }
 
-func readYAMLInput(objs chan<- map[string]any, config Config) {
+func readYAMLInput(objs chan<- map[string]any, inputTypeChan chan<- InputType, config Config) {
 	defer close(objs)
+	defer close(inputTypeChan)
 	decoder := yaml.NewDecoder(os.Stdin)
-	for {
-		var doc any
-		err := decoder.Decode(&doc)
-		if err == io.EOF {
-			break
+
+	var firstObj any
+	err := decoder.Decode(&firstObj)
+	if err != nil {
+		if err == io.EOF { // Handle empty input
+			return
 		}
-		if err != nil {
-			log.Printf("Error decoding YAML: %v", err)
-			continue
-		}
-		// doc may be a sequence or a single mapping.
-		switch v := doc.(type) {
-		case []any:
-			for _, item := range v {
-				rec, ok := item.(map[string]any)
-				if !ok {
-					continue
+		log.Fatalf("Error decoding first YAML object: %v", err)
+	}
+
+	var secondObj any
+	err = decoder.Decode(&secondObj)
+
+	// Case 1: Single document input
+	if err == io.EOF {
+		// It's a single document. Check if it's an array or a singleton object.
+		if reflect.TypeOf(firstObj).Kind() == reflect.Slice {
+			inputTypeChan <- ArrayInput
+			s := reflect.ValueOf(firstObj)
+			for i := 0; i < s.Len(); i++ {
+				item := s.Index(i).Interface()
+				if rec, ok := item.(map[string]any); ok {
+					result := processInput(rec, config)
+					if result != nil {
+						objs <- result
+					}
+				} else {
+					log.Printf("Skipping item in YAML array; not a map[string]any: %T", item)
 				}
+			}
+		} else {
+			inputTypeChan <- SingletonInput
+			if rec, ok := firstObj.(map[string]any); ok {
 				result := processInput(rec, config)
 				if result != nil {
 					objs <- result
 				}
+			} else {
+				log.Printf("Skipping YAML document; not a map[string]any: %T", firstObj)
 			}
-		case map[string]any:
-			result := processInput(v, config)
-			if result != nil {
-				objs <- result
-			}
-		default:
-			// Ignore other document types.
 		}
+		return // Done
+	}
+
+	// Case 2: Error on second document
+	if err != nil {
+		log.Fatalf("Error decoding second YAML object: %v", err)
+	}
+
+	// Case 3: Stream input
+	inputTypeChan <- StreamInput
+
+	// Process the two objects we already have
+	processDecodedYAML(firstObj, objs, config)
+	processDecodedYAML(secondObj, objs, config)
+
+	// Loop for the rest of the stream
+	for {
+		var doc any
+		err := decoder.Decode(&doc)
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			log.Printf("Error decoding YAML stream: %v", err)
+			continue
+		}
+		processDecodedYAML(doc, objs, config)
 	}
 }
 
-func readCSVInput(objs chan<- map[string]any, config Config) {
+// processDecodedYAML is a helper to avoid repetition in readYAMLInput
+func processDecodedYAML(doc any, objs chan<- map[string]any, config Config) {
+	if rec, ok := doc.(map[string]any); ok {
+		result := processInput(rec, config)
+		if result != nil {
+			objs <- result
+		}
+	} else {
+		log.Printf("Skipping YAML document in stream; not a map[string]any: %T", doc)
+	}
+}
+
+func readCSVInput(objs chan<- map[string]any, inputTypeChan chan<- InputType, config Config) {
 	defer close(objs)
+	defer close(inputTypeChan)
+	inputTypeChan <- ArrayInput // CSV is always treated as an array
+
 	reader := csv.NewReader(os.Stdin)
 
 	// Read header row
 	headers, err := reader.Read()
 	if err != nil {
+		if err == io.EOF { // Handle empty file
+			return
+		}
 		log.Fatalf("Error reading CSV header: %v", err)
 	}
 

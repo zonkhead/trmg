@@ -19,7 +19,8 @@ type RecordFormatter interface {
 }
 
 // NewFormatter creates a new RecordFormatter based on the provided config.
-func NewFormatter(config *Config, writer *bufio.Writer, isSingletonInput bool) (RecordFormatter, error) {
+func NewFormatter(config *Config, writer *bufio.Writer, inputType InputType) (RecordFormatter, error) {
+	isSingletonInput := inputType == SingletonInput
 	switch config.OutputFormat {
 	case "json":
 		return NewJSONFormatter(writer, isSingletonInput), nil
@@ -28,7 +29,7 @@ func NewFormatter(config *Config, writer *bufio.Writer, isSingletonInput bool) (
 	case "jsonp":
 		return NewJSONPFormatter(writer, isSingletonInput), nil
 	case "yaml":
-		return NewYAMLFormatter(writer), nil
+		return NewYAMLFormatter(writer, inputType), nil
 	case "csv":
 		return NewCSVFormatter(writer, config), nil
 	default:
@@ -158,33 +159,80 @@ func (f *JSONPFormatter) WriteFooter() error {
 }
 
 // ========
-// YAMLFormatter formats records as a YAML stream.
+// YAMLFormatter formats records as a YAML stream, a single doc, or an array in a doc.
 type YAMLFormatter struct {
-	writer *bufio.Writer
+	writer    *bufio.Writer
+	inputType InputType
+	isFirst   bool
+	records   []map[string]any // Used only for ArrayInput
 }
 
-func NewYAMLFormatter(writer *bufio.Writer) *YAMLFormatter {
-	return &YAMLFormatter{writer: writer}
+func NewYAMLFormatter(writer *bufio.Writer, inputType InputType) *YAMLFormatter {
+	return &YAMLFormatter{
+		writer:    writer,
+		inputType: inputType,
+		isFirst:   true,
+		records:   make([]map[string]any, 0),
+	}
 }
 
 func (f *YAMLFormatter) WriteHeader() error {
-	return nil // No header for YAML
+	return nil // No header for any YAML output type.
 }
 
 func (f *YAMLFormatter) WriteRecord(record map[string]any) error {
-	outBytes, err := yaml.Marshal(record)
-	if err != nil {
-		log.Printf("Error marshaling YAML: %v", err)
+	switch f.inputType {
+	case SingletonInput:
+		// For a singleton, just marshal and write the one record.
+		outBytes, err := yaml.Marshal(record)
+		if err != nil {
+			log.Printf("Error marshaling YAML: %v", err)
+			return err
+		}
+		_, err = f.writer.Write(outBytes)
+		return err
+
+	case ArrayInput:
+		// For an array, buffer the records to be written in the footer.
+		f.records = append(f.records, record)
+		return nil
+
+	case StreamInput:
+		// For a stream, write each record as a separate document.
+		if !f.isFirst {
+			// Prepend a document separator if it's not the first document.
+			_, err := f.writer.WriteString("---\n")
+			if err != nil {
+				return err
+			}
+		}
+		f.isFirst = false
+
+		outBytes, err := yaml.Marshal(record)
+		if err != nil {
+			log.Printf("Error marshaling YAML: %v", err)
+			return err
+		}
+		_, err = f.writer.Write(outBytes)
 		return err
 	}
-	// Prepend a document separator.
-	outBytes = append([]byte("---\n"), outBytes...)
-	_, err = f.writer.Write(outBytes)
-	return err
+	return nil
 }
 
 func (f *YAMLFormatter) WriteFooter() error {
-	return nil // No footer for YAML
+	if f.inputType == ArrayInput {
+		// If the input was an array, marshal the entire buffered slice into a single YAML document.
+		if len(f.records) > 0 {
+			outBytes, err := yaml.Marshal(f.records)
+			if err != nil {
+				log.Printf("Error marshaling YAML array: %v", err)
+				return err
+			}
+			_, err = f.writer.Write(outBytes)
+			return err
+		}
+	}
+	return nil // No footer for other types.
 }
 
 // ========
