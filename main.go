@@ -29,11 +29,10 @@ const (
 func main() {
 	config := getConfig()
 	objs := make(chan map[string]any, 16)
-	inputTypeChan := make(chan InputType, 1) // New channel for input type
+	inputTypeChan := make(chan InputType, 1)
 
 	switch config.InputFormat {
 	case "json", "jsonl":
-		// readJSONInput will determine the type and send it to inputTypeChan
 		go readJSONInput(objs, inputTypeChan, config)
 	case "yaml":
 		go readYAMLInput(objs, inputTypeChan, config)
