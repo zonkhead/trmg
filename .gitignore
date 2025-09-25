@@ -25,3 +25,5 @@ go.work.sum
 .env
 
 trmg
+
+build-and-copy-to-website.sh
