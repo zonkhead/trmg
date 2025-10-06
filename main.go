@@ -32,8 +32,10 @@ func main() {
 	inputTypeChan := make(chan InputType, 1)
 
 	switch config.InputFormat {
-	case "json", "jsonl":
+	case "json":
 		go readJSONInput(objs, inputTypeChan, config)
+	case "jsonl":
+		go readJSONLInput(objs, inputTypeChan, config)
 	case "yaml":
 		go readYAMLInput(objs, inputTypeChan, config)
 	case "csv":
@@ -71,7 +73,7 @@ func main() {
 
 // Reads the command line flags and build a Config from the flags and an optional yaml config.
 func getConfig() Config {
-	version := "0.1.4"
+	version := "0.1.5"
 	var configPath string
 	var config Config
 
@@ -237,65 +239,68 @@ func readJSONInput(objs chan<- map[string]any, inputTypeChan chan<- InputType, c
 	defer close(objs)
 	defer close(inputTypeChan)
 
-	if config.InputFormat == "json" {
-		input, err := io.ReadAll(os.Stdin)
-		if err != nil {
-			log.Fatalf("Error reading input: %v", err)
-		}
-		if len(input) == 0 {
-			return
-		}
+	input, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		log.Fatalf("Error reading input: %v", err)
+	}
+	if len(input) == 0 {
+		return
+	}
 
-		// Try to unmarshal into an array of objects first.
-		var records []map[string]any
-		errArray := json.Unmarshal(input, &records)
-		if errArray == nil {
-			inputTypeChan <- ArrayInput // It's an array
-			for _, record := range records {
-				result := processInput(record, config)
-				if result != nil {
-					objs <- result
-				}
+	// Try to unmarshal into an array of objects first.
+	var records []map[string]any
+	errArray := json.Unmarshal(input, &records)
+	if errArray == nil {
+		inputTypeChan <- ArrayInput // It's an array
+		for _, record := range records {
+			result := processInput(record, config)
+			if result != nil {
+				objs <- result
 			}
-			return
 		}
+		return
+	}
 
-		// If unmarshaling into an array fails, try a single object.
+	// If unmarshaling into an array fails, try a single object.
+	var record map[string]any
+	errObject := json.Unmarshal(input, &record)
+	if errObject == nil {
+		inputTypeChan <- SingletonInput // It's a single object
+		result := processInput(record, config)
+		if result != nil {
+			objs <- result
+		}
+		return
+	}
+
+	// If both fail, report the most likely error.
+	log.Fatalf("Error parsing JSON input: %v", errArray)
+}
+
+func readJSONLInput(objs chan<- map[string]any, inputTypeChan chan<- InputType, config Config) {
+	defer close(objs)
+	defer close(inputTypeChan)
+
+	inputTypeChan <- StreamInput
+
+	scanner := bufio.NewScanner(os.Stdin)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
 		var record map[string]any
-		errObject := json.Unmarshal(input, &record)
-		if errObject == nil {
-			inputTypeChan <- SingletonInput // It's a single object
-			result := processInput(record, config)
-			if result != nil {
-				objs <- result
-			}
-			return
+		if err := json.Unmarshal([]byte(line), &record); err != nil {
+			log.Printf("Error parsing JSON: %v", err)
+			continue
 		}
-
-		// If both fail, report the most likely error.
-		log.Fatalf("Error parsing JSON input: %v", errArray)
-	} else {
-		// JSONL format
-		inputTypeChan <- StreamInput // JSONL is always a stream
-		scanner := bufio.NewScanner(os.Stdin)
-		for scanner.Scan() {
-			line := scanner.Text()
-			if strings.TrimSpace(line) == "" {
-				continue
-			}
-			var record map[string]any
-			if err := json.Unmarshal([]byte(line), &record); err != nil {
-				log.Printf("Error parsing JSON: %v", err)
-				continue
-			}
-			result := processInput(record, config)
-			if result != nil {
-				objs <- result
-			}
+		result := processInput(record, config)
+		if result != nil {
+			objs <- result
 		}
-		if err := scanner.Err(); err != nil {
-			log.Fatalf("Error reading JSONL input: %v", err)
-		}
+	}
+	if err := scanner.Err(); err != nil {
+		log.Fatalf("Error reading JSONL input: %v", err)
 	}
 }
 
