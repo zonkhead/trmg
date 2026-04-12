@@ -387,3 +387,133 @@ name: Bob`
 		testReadYAMLInput(t, "[]", 0, ArrayInput)
 	})
 }
+
+func testReadJSONLInput(t *testing.T, jsonlString string, expectedCount int, expectedType InputType) []map[string]any {
+	t.Helper()
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe failed: %v", err)
+	}
+	if jsonlString != "" {
+		_, err = w.Write([]byte(jsonlString))
+		if err != nil {
+			t.Fatalf("writing to pipe failed: %v", err)
+		}
+	}
+	w.Close()
+
+	origStdin := os.Stdin
+	os.Stdin = r
+	defer func() { os.Stdin = origStdin }()
+
+	objs := make(chan map[string]any, 10)
+	inputTypeChan := make(chan InputType, 1)
+	config := Config{MatchRule: "all"}
+
+	go readJSONLInput(objs, inputTypeChan, config)
+
+	var results []map[string]any
+	for obj := range objs {
+		results = append(results, obj)
+	}
+
+	var gotType InputType
+	select {
+	case gotType = <-inputTypeChan:
+		if gotType != expectedType {
+			t.Errorf("got input type %v, want %v", gotType, expectedType)
+		}
+	default:
+		t.Fatalf("readJSONLInput did not send input type")
+	}
+
+	if len(results) != expectedCount {
+		t.Errorf("got %d records, want %d", len(results), expectedCount)
+	}
+
+	return results
+}
+
+func TestReadJSONLInput(t *testing.T) {
+	jsonlInput := "{\"id\": 1, \"name\": \"one\"}\n{\"id\": 2, \"name\": \"two\"}\n"
+	results := testReadJSONLInput(t, jsonlInput, 2, StreamInput)
+
+	if len(results) == 2 {
+		want1 := map[string]any{"id": float64(1), "name": "one"}
+		want2 := map[string]any{"id": float64(2), "name": "two"}
+		if !reflect.DeepEqual(results[0], want1) {
+			t.Errorf("record 1 got %v, want %v", results[0], want1)
+		}
+		if !reflect.DeepEqual(results[1], want2) {
+			t.Errorf("record 2 got %v, want %v", results[1], want2)
+		}
+	}
+}
+
+func testReadCSVInput(t *testing.T, csvString string, expectedCount int, expectedType InputType) []map[string]any {
+	t.Helper()
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe failed: %v", err)
+	}
+	if csvString != "" {
+		_, err = w.Write([]byte(csvString))
+		if err != nil {
+			t.Fatalf("writing to pipe failed: %v", err)
+		}
+	}
+	w.Close()
+
+	origStdin := os.Stdin
+	os.Stdin = r
+	defer func() { os.Stdin = origStdin }()
+
+	objs := make(chan map[string]any, 10)
+	inputTypeChan := make(chan InputType, 1)
+	config := Config{MatchRule: "all"}
+
+	go readCSVInput(objs, inputTypeChan, config)
+
+	var results []map[string]any
+	for obj := range objs {
+		results = append(results, obj)
+	}
+
+	var gotType InputType
+	select {
+	case gotType = <-inputTypeChan:
+		if gotType != expectedType {
+			t.Errorf("got input type %v, want %v", gotType, expectedType)
+		}
+	default:
+		// For empty input, it might close without sending type or we handle it if tests demand
+		// let's just make it soft fail or only check if count > 0
+		if expectedCount > 0 {
+			t.Fatalf("readCSVInput did not send input type")
+		}
+	}
+
+	if len(results) != expectedCount {
+		t.Errorf("got %d records, want %d", len(results), expectedCount)
+	}
+
+	return results
+}
+
+func TestReadCSVInput(t *testing.T) {
+	csvInput := "id,name\n1,one\n2,two\n"
+	results := testReadCSVInput(t, csvInput, 2, ArrayInput)
+
+	if len(results) == 2 {
+		want1 := map[string]any{"id": "1", "name": "one"}
+		want2 := map[string]any{"id": "2", "name": "two"}
+		if !reflect.DeepEqual(results[0], want1) {
+			t.Errorf("record 1 got %v, want %v", results[0], want1)
+		}
+		if !reflect.DeepEqual(results[1], want2) {
+			t.Errorf("record 2 got %v, want %v", results[1], want2)
+		}
+	}
+}

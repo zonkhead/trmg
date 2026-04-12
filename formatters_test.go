@@ -222,3 +222,50 @@ func TestYAMLFormatter(t *testing.T) {
 		}
 	})
 }
+
+func TestJSONLFormatter(t *testing.T) {
+	testRecord1 := map[string]any{"name": "Alice", "age": 30}
+	testRecord2 := map[string]any{"name": "Bob", "age": 25}
+
+	var buf bytes.Buffer
+	writer := bufio.NewWriter(&buf)
+	formatter := NewJSONLFormatter(writer)
+
+	formatter.WriteHeader()
+	formatter.WriteRecord(testRecord1)
+	formatter.WriteRecord(testRecord2)
+	formatter.WriteFooter()
+	writer.Flush()
+
+	got := buf.String()
+	want := `{"age":30,"name":"Alice"}` + "\n" + `{"age":25,"name":"Bob"}` + "\n"
+	if got != want {
+		t.Errorf("jsonl output got %q, want %q", got, want)
+	}
+}
+
+func TestCSVFormatter(t *testing.T) {
+	cfg := mustConfig(t, `
+common-output:
+- name: name
+- age: age
+`)
+	testRecord1 := map[string]any{"name": "Alice", "age": "30"}
+	testRecord2 := map[string]any{"name": "Bob", "age": 25} // age is int here to test marshaling vs string
+
+	var buf bytes.Buffer
+	writer := bufio.NewWriter(&buf)
+	formatter := NewCSVFormatter(writer, cfg)
+
+	formatter.WriteHeader()
+	formatter.WriteRecord(testRecord1)
+	formatter.WriteRecord(testRecord2)
+	formatter.WriteFooter()
+	writer.Flush()
+
+	got := buf.String()
+	want := "name,age\nAlice,30\nBob,25\n"
+	if got != want {
+		t.Errorf("csv output got %q, want %q", got, want)
+	}
+}
