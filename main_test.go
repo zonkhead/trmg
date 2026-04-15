@@ -85,6 +85,23 @@ match-rule: all
 			t.Errorf("got %v, want %v", got, record)
 		}
 	})
+
+	t.Run("clone original preserves unmapped fields", func(t *testing.T) {
+		record := map[string]any{"foo": "yes", "bar": 1, "unmapped": true}
+		cfg := mustConfig(t, `
+clone-original: true
+specific-outputs:
+- field: foo
+  eq: yes
+  output:
+  - mapped: bar
+`)
+		got := processInput(record, *cfg)
+		want := map[string]any{"foo": "yes", "bar": 1, "unmapped": true, "mapped": 1}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("got %v, want %v", got, want)
+		}
+	})
 }
 
 func Test_applyMapping(t *testing.T) {

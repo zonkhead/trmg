@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"maps"
 	"os"
 	"reflect"
 	"regexp"
@@ -73,7 +72,7 @@ func main() {
 
 // Reads the command line flags and build a Config from the flags and an optional yaml config.
 func getConfig() Config {
-	version := "0.1.5"
+	version := "0.1.6"
 	var configPath string
 	var config Config
 
@@ -196,30 +195,38 @@ func applyMapping(name string, in, out map[string]any, outSpec any) {
 	}
 }
 
-// applyFieldMappings applies a list of field mappings to a record.
-func applyFieldMappings(record map[string]any, mappings []FieldMapping) map[string]any {
-	output := make(map[string]any)
+// applyFieldMappings applies a list of field mappings to an output record based on an input record.
+func applyFieldMappings(record map[string]any, output map[string]any, mappings []FieldMapping) {
 	for _, fm := range mappings {
 		applyMapping(fm.Key, record, output, fm.Output)
 	}
-	return output
 }
 
 // processInput processes one record:
-// 1. Applies the common mappings.
-// 2. Iterates over specific rules (first match wins) and merges in its extra mappings.
-// 3. If no specific rule matches and matchRule is "drop-no-match", returns nil.
-// 4. If no specific rule matches and matchRule is "all", returns original record.
+// 1. Clones the original if configured.
+// 2. Applies the common mappings.
+// 3. Iterates over specific rules (first match wins) and merges in its extra mappings.
+// 4. If no specific rule matches and matchRule is "drop-no-match", returns nil.
+// 5. If no specific rule matches and matchRule is "all", returns original record.
 func processInput(record map[string]any, config Config) map[string]any {
+	var output map[string]any
+	if config.CloneOriginal {
+		output = make(map[string]any, len(record))
+		for k, v := range record {
+			output[k] = v
+		}
+	} else {
+		output = make(map[string]any)
+	}
+
 	commonMappings := convertFieldMappings(config.CommonOutput)
-	output := applyFieldMappings(record, commonMappings)
+	applyFieldMappings(record, output, commonMappings)
 	matchedSpecific := false
 	for _, rule := range config.SpecificOutputs {
 		if rule.Check(record) {
 			matchedSpecific = true
 			ruleMappings := convertFieldMappings(rule.Output)
-			additional := applyFieldMappings(record, ruleMappings)
-			maps.Copy(output, additional)
+			applyFieldMappings(record, output, ruleMappings)
 			break
 		}
 	}
@@ -227,8 +234,8 @@ func processInput(record map[string]any, config Config) map[string]any {
 		return nil
 	}
 
-	// Nothing was mapped so we output the whole thing
-	if len(output) == 0 {
+	// Nothing was mapped and we didn't clone the original, so we output the whole thing
+	if !config.CloneOriginal && len(output) == 0 {
 		return record
 	}
 

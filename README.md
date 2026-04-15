@@ -37,3 +37,37 @@ specific-outputs:
       mn: protoPayload.methodName 
       rn: protoPayload.methodName 
 ```
+
+### Pass-through (Clone Original)
+
+If you'd like to output the entire structure of the original matching objects but just add or override certain fields, use `clone-original: true`:
+
+```yaml
+clone-original: true
+
+# no common-output needed since we inherit all fields
+specific-outputs:
+- field: logName
+  matches: .*?cloudaudit.googleapis.com/.*
+  output:
+  - principal: protoPayload.authenticationInfo.principalEmail
+```
+
+### Command Line Usage with Heredocs
+
+You can use bash process substitution to elegantly provide the configuration file in-line while parsing standard input:
+
+```bash
+./trmg -i jsonl -o jsonl -c <(cat <<'EOF'
+clone-original: true
+specific-outputs:
+- field: level
+  eq: "error"
+  output:
+  - requires_attention: "YES"
+EOF
+) <<'EOF'
+{"level": "info", "message": "User logged in"}
+{"level": "error", "message": "Database connection lost"}
+EOF
+```

@@ -14,6 +14,7 @@ type OutputMap map[string]any
 // Config represents the configuration as defined in YAML.
 type Config struct {
 	MatchRule       string               `yaml:"match-rule"`
+	CloneOriginal   bool                 `yaml:"clone-original"`
 	CommonOutput    []OutputMap          `yaml:"common-output"`
 	SpecificOutputs []SpecificOutputRule `yaml:"specific-outputs"`
 	InputFormat     string
