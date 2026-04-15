@@ -436,7 +436,3 @@ func readCSVInput(objs chan<- map[string]any, inputTypeChan chan<- InputType, co
 func stderrln(s string) {
 	fmt.Fprintln(os.Stderr, s)
 }
-
-func stderrf(fs string, a ...any) {
-	fmt.Fprintf(os.Stderr, fs, a...)
-}

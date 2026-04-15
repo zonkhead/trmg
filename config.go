@@ -8,6 +8,7 @@ const DEFAULT_MATCH_RULE = "all"
 const DEFAULT_INPUT_FORMAT = "yaml"
 const DEFAULT_OUTPUT_FORMAT = "yaml"
 
+// OutputMap defines a map structure used for specifying output fields dynamically.
 type OutputMap map[string]any
 
 // Config represents the configuration as defined in YAML.
