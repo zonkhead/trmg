@@ -114,6 +114,15 @@ func Test_applyMapping(t *testing.T) {
 		}
 	})
 
+	t.Run("string literal mapping", func(t *testing.T) {
+		in := map[string]any{"foo": 42}
+		out := map[string]any{}
+		applyMapping("bar", in, out, "YES")
+		if got, want := out["bar"], "YES"; got != want {
+			t.Errorf("got %v, want %v", got, want)
+		}
+	})
+
 	t.Run("regex value mapping", func(t *testing.T) {
 		in := map[string]any{"text": "hello-123"}
 		out := map[string]any{}
@@ -199,6 +208,54 @@ func Test_getValueByPath(t *testing.T) {
 			got := getValueByPath(tt.record, tt.path)
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("getValueByPath() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func Test_lookupValueByPath(t *testing.T) {
+	tests := []struct {
+		name   string
+		record map[string]any
+		path   string
+		want   any
+		ok     bool
+	}{
+		{
+			name:   "flat key exists",
+			record: map[string]any{"foo": 42},
+			path:   "foo",
+			want:   42,
+			ok:     true,
+		},
+		{
+			name:   "missing key",
+			record: map[string]any{"foo": 42},
+			path:   "bar",
+			want:   nil,
+			ok:     false,
+		},
+		{
+			name:   "present nil value",
+			record: map[string]any{"foo": nil},
+			path:   "foo",
+			want:   nil,
+			ok:     true,
+		},
+		{
+			name:   "empty path",
+			record: map[string]any{"foo": 42},
+			path:   "",
+			want:   nil,
+			ok:     false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := lookupValueByPath(tt.record, tt.path)
+			if !reflect.DeepEqual(got, tt.want) || ok != tt.ok {
+				t.Errorf("lookupValueByPath() = (%v, %v), want (%v, %v)", got, ok, tt.want, tt.ok)
 			}
 		})
 	}

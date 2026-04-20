@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"maps"
 	"os"
 	"reflect"
 	"regexp"
@@ -72,7 +73,7 @@ func main() {
 
 // Reads the command line flags and build a Config from the flags and an optional yaml config.
 func getConfig() Config {
-	version := "0.1.6"
+	version := "0.1.7"
 	var configPath string
 	var config Config
 
@@ -126,16 +127,31 @@ func getConfig() Config {
 
 // getValueByPath traverses a record (a map) following a dot-separated path.
 func getValueByPath(record map[string]any, path string) any {
+	val, _ := lookupValueByPath(record, path)
+	return val
+}
+
+// lookupValueByPath traverses a record following a dot-separated path and
+// reports whether that path exists, even if the resulting value is nil.
+func lookupValueByPath(record map[string]any, path string) (any, bool) {
+	if path == "" {
+		return nil, false
+	}
+
 	parts := strings.Split(path, ".")
 	var current any = record
 	for _, part := range parts {
 		if m, ok := current.(map[string]any); ok {
-			current = m[part]
+			val, exists := m[part]
+			if !exists {
+				return nil, false
+			}
+			current = val
 		} else {
-			return nil
+			return nil, false
 		}
 	}
-	return current
+	return current, true
 }
 
 func hasKeys[K comparable, V any](m map[K]V, ks ...K) bool {
@@ -158,7 +174,11 @@ func strval(om OutputMap, key string) string {
 func applyMapping(name string, in, out map[string]any, outSpec any) {
 	switch v := outSpec.(type) {
 	case string:
-		out[name] = getValueByPath(in, v)
+		if val, ok := lookupValueByPath(in, v); ok {
+			out[name] = val
+		} else {
+			out[name] = v
+		}
 	case OutputMap:
 		if hasKeys(v, "src", "regex", "value") {
 			src := strval(v, "src")
@@ -212,9 +232,7 @@ func processInput(record map[string]any, config Config) map[string]any {
 	var output map[string]any
 	if config.CloneOriginal {
 		output = make(map[string]any, len(record))
-		for k, v := range record {
-			output[k] = v
-		}
+		maps.Copy(output, record)
 	} else {
 		output = make(map[string]any)
 	}

@@ -64,10 +64,17 @@ specific-outputs:
 - field: level
   eq: "error"
   output:
-  - requires_attention: "YES"
+  - requires_attention: YES
 EOF
 ) <<'EOF'
 {"level": "info", "message": "User logged in"}
 {"level": "error", "message": "Database connection lost"}
 EOF
+```
+
+Expected output:
+
+```jsonl
+{"level":"info","message":"User logged in"}
+{"level":"error","message":"Database connection lost","requires_attention":"YES"}
 ```
