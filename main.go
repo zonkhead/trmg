@@ -110,13 +110,15 @@ func getConfig() Config {
 	}
 
 	if configPath != "" {
-		// Read and parse the confuration.
+		// Read and parse the configuration. The path is intentionally supplied
+		// by the CLI user so configs can live outside the current directory.
+		// #nosec G304
 		configData, err := os.ReadFile(configPath)
-		if err := yaml.Unmarshal(configData, &config); err != nil {
-			log.Fatalf("Error parsing config file: %v", err)
-		}
 		if err != nil {
 			log.Fatalf("Error reading config file: %v", err)
+		}
+		if err := yaml.Unmarshal(configData, &config); err != nil {
+			log.Fatalf("Error parsing config file: %v", err)
 		}
 	}
 	if config.MatchRule == "" {

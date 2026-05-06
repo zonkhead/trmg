@@ -21,14 +21,13 @@
 go.work
 go.work.sum
 
-# env file
+# Local ignores
 .env
-
 trmg
-
 build-and-copy-to-website.sh
 
 # Agent files
 CLAUDE.md
 GEMINI.md
 AGENTS.md
+.codex
