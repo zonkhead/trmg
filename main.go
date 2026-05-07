@@ -10,7 +10,6 @@ import (
 	"log"
 	"maps"
 	"os"
-	"reflect"
 	"regexp"
 	"strings"
 
@@ -73,7 +72,7 @@ func main() {
 
 // Reads the command line flags and build a Config from the flags and an optional yaml config.
 func getConfig() Config {
-	version := "0.1.7"
+	version := "0.1.8"
 	var configPath string
 	var config Config
 
@@ -350,46 +349,31 @@ func readYAMLInput(objs chan<- map[string]any, inputTypeChan chan<- InputType, c
 
 	// Case 1: Single document input
 	if err == io.EOF {
-		// It's a single document. Check if it's an array or a singleton object.
-		if reflect.TypeOf(firstObj).Kind() == reflect.Slice {
+		if slice, ok := firstObj.([]any); ok {
 			inputTypeChan <- ArrayInput
-			s := reflect.ValueOf(firstObj)
-			for i := 0; i < s.Len(); i++ {
-				item := s.Index(i).Interface()
-				if rec, ok := item.(map[string]any); ok {
-					result := processInput(rec, config)
-					if result != nil {
-						objs <- result
-					}
-				} else {
-					log.Printf("Skipping item in YAML array; not a map[string]any: %T", item)
-				}
+			for _, item := range slice {
+				processDecodedYAML(item, objs, config)
 			}
 		} else {
 			inputTypeChan <- SingletonInput
-			if rec, ok := firstObj.(map[string]any); ok {
-				result := processInput(rec, config)
-				if result != nil {
-					objs <- result
-				}
-			} else {
-				log.Printf("Skipping YAML document; not a map[string]any: %T", firstObj)
-			}
+			processDecodedYAML(firstObj, objs, config)
 		}
-		return // Done
+		return
 	}
 
-	// Case 2: Error on second document
-	if err != nil {
-		log.Fatalf("Error decoding second YAML object: %v", err)
-	}
-
-	// Case 3: Stream input
+	// Case 2: Stream input
 	inputTypeChan <- StreamInput
 
-	// Process the two objects we already have
+	// Process the first object
 	processDecodedYAML(firstObj, objs, config)
-	processDecodedYAML(secondObj, objs, config)
+
+	// Process the second object or log the error gracefully
+	if err != nil {
+		log.Printf("Error decoding second YAML object: %v", err)
+		return
+	} else {
+		processDecodedYAML(secondObj, objs, config)
+	}
 
 	// Loop for the rest of the stream
 	for {
@@ -400,7 +384,7 @@ func readYAMLInput(objs chan<- map[string]any, inputTypeChan chan<- InputType, c
 				break
 			}
 			log.Printf("Error decoding YAML stream: %v", err)
-			continue
+			break
 		}
 		processDecodedYAML(doc, objs, config)
 	}

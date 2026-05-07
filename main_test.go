@@ -460,6 +460,35 @@ name: Bob`
 	t.Run("single empty array", func(t *testing.T) {
 		testReadYAMLInput(t, "[]", 0, ArrayInput)
 	})
+
+	t.Run("malformed document in stream", func(t *testing.T) {
+		yamlInput := "name: Alice\n---\n[ invalid syntax\n---\nname: Bob"
+		// Only Alice should be read. The syntax error breaks the stream parsing.
+		// If it hangs here, we have an infinite loop!
+		results := testReadYAMLInput(t, yamlInput, 1, StreamInput)
+		if len(results) == 1 {
+			want := map[string]any{"name": "Alice"}
+			if !reflect.DeepEqual(results[0], want) {
+				t.Errorf("got %v, want %v", results[0], want)
+			}
+		}
+	})
+
+	t.Run("stream containing an array", func(t *testing.T) {
+		yamlInput := "name: Alice\n---\n- name: Bob\n- name: Charlie\n---\nname: Dave"
+		// The array is skipped, so we should get Alice and Dave
+		results := testReadYAMLInput(t, yamlInput, 2, StreamInput)
+		if len(results) == 2 {
+			want1 := map[string]any{"name": "Alice"}
+			want2 := map[string]any{"name": "Dave"}
+			if !reflect.DeepEqual(results[0], want1) {
+				t.Errorf("record 1 got %v, want %v", results[0], want1)
+			}
+			if !reflect.DeepEqual(results[1], want2) {
+				t.Errorf("record 2 got %v, want %v", results[1], want2)
+			}
+		}
+	})
 }
 
 func testReadJSONLInput(t *testing.T, jsonlString string, expectedCount int, expectedType InputType) []map[string]any {
