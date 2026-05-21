@@ -245,27 +245,51 @@ func TestJSONLFormatter(t *testing.T) {
 }
 
 func TestCSVFormatter(t *testing.T) {
-	cfg := mustConfig(t, `
+	t.Run("config headers", func(t *testing.T) {
+		cfg := mustConfig(t, `
 common-output:
 - name: name
 - age: age
 `)
-	testRecord1 := map[string]any{"name": "Alice", "age": "30"}
-	testRecord2 := map[string]any{"name": "Bob", "age": 25} // age is int here to test marshaling vs string
+		testRecord1 := map[string]any{"name": "Alice", "age": "30"}
+		testRecord2 := map[string]any{"name": "Bob", "age": 25} // age is int here to test marshaling vs string
 
-	var buf bytes.Buffer
-	writer := bufio.NewWriter(&buf)
-	formatter := NewCSVFormatter(writer, cfg)
+		var buf bytes.Buffer
+		writer := bufio.NewWriter(&buf)
+		formatter := NewCSVFormatter(writer, cfg)
 
-	formatter.WriteHeader()
-	formatter.WriteRecord(testRecord1)
-	formatter.WriteRecord(testRecord2)
-	formatter.WriteFooter()
-	writer.Flush()
+		formatter.WriteHeader()
+		formatter.WriteRecord(testRecord1)
+		formatter.WriteRecord(testRecord2)
+		formatter.WriteFooter()
+		writer.Flush()
 
-	got := buf.String()
-	want := "name,age\nAlice,30\nBob,25\n"
-	if got != want {
-		t.Errorf("csv output got %q, want %q", got, want)
-	}
+		got := buf.String()
+		want := "name,age\nAlice,30\nBob,25\n"
+		if got != want {
+			t.Errorf("csv output got %q, want %q", got, want)
+		}
+	})
+
+	t.Run("dynamic headers", func(t *testing.T) {
+		cfg := &Config{}
+		testRecord1 := map[string]any{"name": "Alice", "age": 30}
+		testRecord2 := map[string]any{"name": "Bob", "age": 25}
+
+		var buf bytes.Buffer
+		writer := bufio.NewWriter(&buf)
+		formatter := NewCSVFormatter(writer, cfg)
+
+		formatter.WriteHeader()
+		formatter.WriteRecord(testRecord1)
+		formatter.WriteRecord(testRecord2)
+		formatter.WriteFooter()
+		writer.Flush()
+
+		got := buf.String()
+		want := "age,name\n30,Alice\n25,Bob\n"
+		if got != want {
+			t.Errorf("csv dynamic output got %q, want %q", got, want)
+		}
+	})
 }

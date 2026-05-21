@@ -238,8 +238,9 @@ func (f *YAMLFormatter) WriteFooter() error {
 // ========
 // CSVFormatter formats records as CSV.
 type CSVFormatter struct {
-	csvWriter   *csv.Writer
-	headerOrder []string
+	csvWriter     *csv.Writer
+	headerOrder   []string
+	headerWritten bool
 }
 
 func NewCSVFormatter(writer *bufio.Writer, config *Config) *CSVFormatter {
@@ -250,10 +251,27 @@ func NewCSVFormatter(writer *bufio.Writer, config *Config) *CSVFormatter {
 }
 
 func (f *CSVFormatter) WriteHeader() error {
-	return f.csvWriter.Write(f.headerOrder)
+	if len(f.headerOrder) > 0 {
+		f.headerWritten = true
+		return f.csvWriter.Write(f.headerOrder)
+	}
+	return nil
 }
 
 func (f *CSVFormatter) WriteRecord(rec map[string]any) error {
+	if !f.headerWritten {
+		keys := make([]string, 0, len(rec))
+		for k := range rec {
+			keys = append(keys, k)
+		}
+		slices.Sort(keys)
+		f.headerOrder = keys
+		f.headerWritten = true
+		if err := f.csvWriter.Write(f.headerOrder); err != nil {
+			return err
+		}
+	}
+
 	row := make([]string, len(f.headerOrder))
 	for i, h := range f.headerOrder {
 		if val, ok := rec[h]; ok {

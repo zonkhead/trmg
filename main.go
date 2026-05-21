@@ -72,7 +72,7 @@ func main() {
 
 // Reads the command line flags and build a Config from the flags and an optional yaml config.
 func getConfig() Config {
-	version := "0.1.8"
+	version := "0.1.9"
 	var configPath string
 	var config Config
 
