@@ -78,3 +78,51 @@ Expected output:
 {"level":"info","message":"User logged in"}
 {"level":"error","message":"Database connection lost","requires_attention":"YES"}
 ```
+
+## Rust Experiment
+
+Transmogrifier has been ported to Rust as a highly optimized, sequential stream processor.
+
+### Build
+To compile the optimized release binary:
+```bash
+cargo build --release
+```
+The compiled binary will be located at `./target/release/trmg-rust`.
+
+### Run Tests
+To execute the complete suite of ported unit tests:
+```bash
+cargo test
+```
+
+### Performance Benchmarking
+A Python script is included to generate large, high-fidelity log streams for performance testing.
+
+1. **Synthesize Datasets** (generates 200,000 JSONL records and 200,000 YAML records inside `test-data/`):
+   ```bash
+   python3 test-data/generate.py
+   ```
+
+2. **Benchmark JSONL Stream** (200,000 records):
+   ```bash
+   # Build Go binary first
+   go build -o trmg-go
+
+   # Run Go JSONL Benchmark
+   time ./trmg-go -c test-data/config.yaml -i jsonl -o jsonl < test-data/large_audit.jsonl > /dev/null
+
+   # Run Rust JSONL Benchmark
+   time ./target/release/trmg-rust -c test-data/config.yaml -i jsonl -o jsonl --buffered < test-data/large_audit.jsonl > /dev/null
+   ```
+
+3. **Benchmark YAML Stream** (200,000 records):
+   ```bash
+   # Run Go YAML Benchmark
+   time ./trmg-go -c test-data/config.yaml -i yaml -o yaml < test-data/large_audit.yaml > /dev/null
+
+   # Run Rust YAML Benchmark
+   time ./target/release/trmg-rust -c test-data/config.yaml -i yaml -o yaml --buffered < test-data/large_audit.yaml > /dev/null
+   ```
+
+
