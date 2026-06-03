@@ -1,8 +1,13 @@
 package main
 
 import (
+	"bytes"
+	"flag"
+	"io"
 	"os"
+	"os/exec"
 	"reflect"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -620,3 +625,342 @@ func TestReadCSVInput(t *testing.T) {
 		}
 	}
 }
+
+func Test_getConfig(t *testing.T) {
+	// Backup original args and command line
+	origArgs := os.Args
+	defer func() { os.Args = origArgs }()
+
+	origCommandLine := flag.CommandLine
+	defer func() { flag.CommandLine = origCommandLine }()
+
+	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
+
+	os.Args = []string{os.Args[0], "-i", "json", "-o", "jsonl", "-buffered"}
+
+	config := getConfig()
+
+	if config.InputFormat != "json" {
+		t.Errorf("expected InputFormat to be json, got %s", config.InputFormat)
+	}
+	if config.OutputFormat != "jsonl" {
+		t.Errorf("expected OutputFormat to be jsonl, got %s", config.OutputFormat)
+	}
+	if !config.Buffered {
+		t.Errorf("expected Buffered to be true, got %t", config.Buffered)
+	}
+
+	// Call flag.Usage to cover it
+	if flag.CommandLine.Usage != nil {
+		origStderr := os.Stderr
+		os.Stderr = os.NewFile(0, os.DevNull) // Suppress output
+		flag.CommandLine.Usage()
+		os.Stderr = origStderr
+	}
+}
+
+func Test_getConfig_version(t *testing.T) {
+	if os.Getenv("BE_CRASH_TEST_VERSION") == "1" {
+		origArgs := os.Args
+		defer func() { os.Args = origArgs }()
+		origCommandLine := flag.CommandLine
+		defer func() { flag.CommandLine = origCommandLine }()
+		flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
+
+		os.Args = []string{os.Args[0], "-version"}
+		getConfig()
+		return
+	}
+
+	cmd := exec.Command(os.Args[0], "-test.run=Test_getConfig_version")
+	cmd.Env = append(os.Environ(), "BE_CRASH_TEST_VERSION=1")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	if err != nil {
+		// Expect exit 0, but exec.Command on Exit(0) returns nil err.
+	}
+	if !strings.Contains(stderr.String(), "Version: 0.1.9") {
+		t.Errorf("expected output to contain version info, got %q", stderr.String())
+	}
+}
+
+func Test_getConfig_invalid_input(t *testing.T) {
+	if os.Getenv("BE_CRASH_TEST_INVALID_INPUT") == "1" {
+		origArgs := os.Args
+		defer func() { os.Args = origArgs }()
+		origCommandLine := flag.CommandLine
+		defer func() { flag.CommandLine = origCommandLine }()
+		flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
+
+		os.Args = []string{os.Args[0], "-i", "invalid"}
+		getConfig()
+		return
+	}
+
+	cmd := exec.Command(os.Args[0], "-test.run=Test_getConfig_invalid_input")
+	cmd.Env = append(os.Environ(), "BE_CRASH_TEST_INVALID_INPUT=1")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	cmd.Run()
+	if !strings.Contains(stderr.String(), "Invalid input format: invalid") {
+		t.Errorf("expected stderr to contain invalid input message, got %q", stderr.String())
+	}
+}
+
+func Test_getConfig_invalid_output(t *testing.T) {
+	if os.Getenv("BE_CRASH_TEST_INVALID_OUTPUT") == "1" {
+		origArgs := os.Args
+		defer func() { os.Args = origArgs }()
+		origCommandLine := flag.CommandLine
+		defer func() { flag.CommandLine = origCommandLine }()
+		flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
+
+		os.Args = []string{os.Args[0], "-o", "invalid"}
+		getConfig()
+		return
+	}
+
+	cmd := exec.Command(os.Args[0], "-test.run=Test_getConfig_invalid_output")
+	cmd.Env = append(os.Environ(), "BE_CRASH_TEST_INVALID_OUTPUT=1")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	cmd.Run()
+	if !strings.Contains(stderr.String(), "Invalid output format: invalid") {
+		t.Errorf("expected stderr to contain invalid output message, got %q", stderr.String())
+	}
+}
+
+func Test_getConfig_with_file(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "trmg-test-config-*.yaml")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	configContent := `
+match-rule: drop-no-match
+clone-original: true
+`
+	if _, err := tmpFile.Write([]byte(configContent)); err != nil {
+		t.Fatalf("failed to write to temp file: %v", err)
+	}
+	tmpFile.Close()
+
+	origArgs := os.Args
+	defer func() { os.Args = origArgs }()
+	origCommandLine := flag.CommandLine
+	defer func() { flag.CommandLine = origCommandLine }()
+	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
+
+	os.Args = []string{os.Args[0], "-c", tmpFile.Name()}
+	config := getConfig()
+
+	if config.MatchRule != "drop-no-match" {
+		t.Errorf("expected MatchRule to be drop-no-match, got %s", config.MatchRule)
+	}
+	if !config.CloneOriginal {
+		t.Errorf("expected CloneOriginal to be true")
+	}
+}
+
+func Test_getConfig_missing_file(t *testing.T) {
+	if os.Getenv("BE_CRASH_TEST_MISSING_FILE") == "1" {
+		origArgs := os.Args
+		defer func() { os.Args = origArgs }()
+		origCommandLine := flag.CommandLine
+		defer func() { flag.CommandLine = origCommandLine }()
+		flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
+
+		os.Args = []string{os.Args[0], "-c", "nonexistent-file.yaml"}
+		getConfig()
+		return
+	}
+
+	cmd := exec.Command(os.Args[0], "-test.run=Test_getConfig_missing_file")
+	cmd.Env = append(os.Environ(), "BE_CRASH_TEST_MISSING_FILE=1")
+	err := cmd.Run()
+	if err == nil {
+		t.Errorf("expected process to fail for missing file, but it exited successfully")
+	}
+}
+
+func Test_getConfig_invalid_yaml(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "trmg-test-config-*.yaml")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	if _, err := tmpFile.Write([]byte("[1, 2, 3]")); err != nil {
+		t.Fatalf("failed to write to temp file: %v", err)
+	}
+	tmpFile.Close()
+
+	if os.Getenv("BE_CRASH_TEST_INVALID_YAML") == "1" {
+		origArgs := os.Args
+		defer func() { os.Args = origArgs }()
+		origCommandLine := flag.CommandLine
+		defer func() { flag.CommandLine = origCommandLine }()
+		flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
+
+		os.Args = []string{os.Args[0], "-c", os.Getenv("TMPFILE_PATH")}
+		getConfig()
+		return
+	}
+
+	cmd := exec.Command(os.Args[0], "-test.run=Test_getConfig_invalid_yaml")
+	cmd.Env = append(os.Environ(), "BE_CRASH_TEST_INVALID_YAML=1", "TMPFILE_PATH="+tmpFile.Name())
+	err = cmd.Run()
+	if err == nil {
+		t.Errorf("expected process to fail for invalid yaml, but it exited successfully")
+	}
+}
+
+func Test_main(t *testing.T) {
+	origStdin := os.Stdin
+	origStdout := os.Stdout
+	origArgs := os.Args
+	origCommandLine := flag.CommandLine
+
+	defer func() {
+		os.Stdin = origStdin
+		os.Stdout = origStdout
+		os.Args = origArgs
+		flag.CommandLine = origCommandLine
+	}()
+
+	inR, inW, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe failed: %v", err)
+	}
+	outR, outW, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe failed: %v", err)
+	}
+
+	os.Stdin = inR
+	os.Stdout = outW
+
+	inputData := `{"name": "Alice"}` + "\n" + `{"name": "Bob"}` + "\n"
+	go func() {
+		inW.Write([]byte(inputData))
+		inW.Close()
+	}()
+
+	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
+	os.Args = []string{os.Args[0], "-i", "jsonl", "-o", "jsonl"}
+
+	main()
+	outW.Close()
+
+	var buf bytes.Buffer
+	io.Copy(&buf, outR)
+	outR.Close()
+
+	got := buf.String()
+	want := `{"name":"Alice"}` + "\n" + `{"name":"Bob"}` + "\n"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func Test_stderrln(t *testing.T) {
+	origStderr := os.Stderr
+	defer func() { os.Stderr = origStderr }()
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe failed: %v", err)
+	}
+	os.Stderr = w
+
+	stderrln("test error")
+	w.Close()
+
+	var buf bytes.Buffer
+	io.Copy(&buf, r)
+	r.Close()
+
+	got := buf.String()
+	want := "test error\n"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func Test_strval(t *testing.T) {
+	om := OutputMap{
+		"valid":   "hello",
+		"invalid": 123,
+	}
+	if got := strval(om, "valid"); got != "hello" {
+		t.Errorf("got %q, want %q", got, "hello")
+	}
+	if got := strval(om, "invalid"); got != "" {
+		t.Errorf("got %q, want %q", got, "")
+	}
+	if got := strval(om, "missing"); got != "" {
+		t.Errorf("got %q, want %q", got, "")
+	}
+}
+
+func Test_applyMapping_edgecases(t *testing.T) {
+	t.Run("invalid regex", func(t *testing.T) {
+		in := map[string]any{"text": "hello"}
+		out := map[string]any{}
+		outSpec := OutputMap{
+			"src":   "text",
+			"regex": "[invalid regex",
+			"value": "foo",
+		}
+		applyMapping("result", in, out, outSpec)
+		if _, exists := out["result"]; exists {
+			t.Errorf("expected no mapping created for invalid regex")
+		}
+	})
+
+	t.Run("src value not string", func(t *testing.T) {
+		in := map[string]any{"text": 123} // integer instead of string
+		out := map[string]any{}
+		outSpec := OutputMap{
+			"src":   "text",
+			"regex": "hello",
+			"value": "foo",
+		}
+		applyMapping("result", in, out, outSpec)
+		if _, exists := out["result"]; exists {
+			t.Errorf("expected no mapping created when src value is not a string")
+		}
+	})
+
+	t.Run("regex no match", func(t *testing.T) {
+		in := map[string]any{"text": "hello"}
+		out := map[string]any{}
+		outSpec := OutputMap{
+			"src":   "text",
+			"regex": "world",
+			"value": "foo",
+		}
+		applyMapping("result", in, out, outSpec)
+		if _, exists := out["result"]; exists {
+			t.Errorf("expected no mapping created when regex does not match")
+		}
+	})
+
+	t.Run("empty value mapping", func(t *testing.T) {
+		in := map[string]any{"text": "hello"}
+		out := map[string]any{}
+		outSpec := OutputMap{
+			"src":   "text",
+			"regex": "hello",
+			"value": "",
+		}
+		applyMapping("result", in, out, outSpec)
+		if _, exists := out["result"]; exists {
+			t.Errorf("expected no mapping created when value template is empty")
+		}
+	})
+}
+
+

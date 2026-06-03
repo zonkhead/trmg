@@ -293,3 +293,34 @@ common-output:
 		}
 	})
 }
+
+func TestNewFormatter(t *testing.T) {
+	var buf bytes.Buffer
+	writer := bufio.NewWriter(&buf)
+
+	tests := []struct {
+		format    string
+		inputType InputType
+		wantErr   bool
+	}{
+		{"json", SingletonInput, false},
+		{"jsonl", StreamInput, false},
+		{"jsonp", ArrayInput, false},
+		{"yaml", StreamInput, false},
+		{"csv", ArrayInput, false},
+		{"invalid", StreamInput, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.format, func(t *testing.T) {
+			cfg := &Config{OutputFormat: tt.format}
+			formatter, err := NewFormatter(cfg, writer, tt.inputType)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("NewFormatter() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if !tt.wantErr && formatter == nil {
+				t.Errorf("NewFormatter() returned nil formatter without error")
+			}
+		})
+	}
+}
