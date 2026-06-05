@@ -13,7 +13,7 @@ use crate::formatters::InputType;
 #[command(
     name = "trmg",
     about = "An application that takes in a jsonl, yaml, or csv input stream and lets you customize the output objects and data type.",
-    disable_version_flag = true
+    version
 )]
 struct Args {
     #[arg(short = 'c', help = "Path to configuration YAML file")]
@@ -27,18 +27,10 @@ struct Args {
 
     #[arg(long = "buffered", help = "Force buffered output (don't flush after each record)")]
     buffered: bool,
-
-    #[arg(long = "version", help = "Show version info")]
-    version: bool,
 }
 
 fn main() {
     let args = Args::parse();
-
-    if args.version {
-        eprintln!("Version: 0.1.9");
-        std::process::exit(0);
-    }
 
     let valid_inputs = ["json", "jsonl", "yaml", "csv"];
     if !valid_inputs.contains(&args.input.as_str()) {
